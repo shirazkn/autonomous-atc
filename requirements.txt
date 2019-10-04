@@ -1,0 +1,11 @@
+# For BlueSky
+scipy
+pyqt5
+pyqtwebengine
+matplotlib
+pyopengl
+pyopengl-accelerate
+pygame
+zmq
+msgpack
+pandas
