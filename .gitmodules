@@ -1,0 +1,3 @@
+[submodule "bluesky"]
+	path = bluesky
+	url = git@github.com:shirazkn/bluesky.git
