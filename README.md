@@ -4,6 +4,8 @@ Preliminary investigation by me, as part of a larger group project.
 
 Currently working on getting BlueSky running. By design, BlueSky can take in time-series scenario files (`.SCN`), but we want it to be able to stream data back and forth to Python.
 
+Clone this repo using `git clone --recursive <link>`, since it uses a submodule.
+
 #### INSTALLING (General)
 Installing dependencies,
 - On **MacOS** with Python 3.6x, use `pip install -r requirements.txt`

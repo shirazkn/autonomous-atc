@@ -13,6 +13,7 @@ To configure tcl-tk and zlib for use by pyenv,
 `export LDFLAGS="${LDFLAGS} -L/usr/local/opt/zlib/lib"`<br>
 `export CPPFLAGS="${CPPFLAGS} -I/usr/local/opt/zlib/include"`<br>
 `export PKG_CONFIG_PATH="${PKG_CONFIG_PATH} /usr/local/opt/zlib/lib/pkgconfig"`
+- Restart your shell
 
 To set up a virtual environment within a pyenv environment,
 - `brew install pyenv`
