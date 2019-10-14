@@ -9,10 +9,10 @@ from bluesky.traffic.asas import DoNothing
 resolve_with_plugin = DoNothing.resolve
 
 
-def start(resolve_fn=None):
+def start(asas, resolve_fn=None):
     """
     Call this function as part of your plugin's initialization
-    See plugins/CR_2Aircraft.py
+    See plugins/CR_2Aircraft_BOX.py
     """
     global resolve_with_plugin
     if resolve_fn:
