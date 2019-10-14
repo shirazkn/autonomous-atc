@@ -14,13 +14,7 @@ LIMITS_LON = [-2, 2]
 
 
 def init_plugin():
-    # Make sure 'resolve' function defined in plugin is used by ASAS
-    PluginBasedCR.start()
-
-    # Set area of interest; flights exiting this area are deleted
-    limits_str = f"{LIMITS_LAT[0]-0.01} {LIMITS_LON[0]+0.01} {LIMITS_LAT[1]-0.01} {LIMITS_LON[1]+0.01}"
-    stack.stack(f"BOX Box1 {limits_str}")
-    stack.stack("AREA Box1")
+    reset()
 
     # Configuration parameters
     config = {
@@ -40,6 +34,16 @@ def init_plugin():
     }
 
     return config, stackfunctions
+
+
+def reset():
+    # Makes sure 'resolve' function defined in plugin is used by ASAS
+    PluginBasedCR.start()
+
+    # Sets area of interest, flights exiting this area are deleted
+    limits_str = f"{LIMITS_LAT[0]} {LIMITS_LON[0]} {LIMITS_LAT[1]} {LIMITS_LON[1]}"
+    stack.stack(f"BOX Box1 {limits_str}")
+    stack.stack("AREA Box1")
 
 
 def update():
@@ -127,13 +131,3 @@ def create_enemy_ac():
     hdg_min, hdg_max = get_hdg_limits(pos_lat, pos_lon)
     hdg = random.uniform(hdg_min, hdg_max) % 360
     stack.stack(f"CRE ENEMY B744 {pos_lat} {pos_lon} {hdg} FL200 400")
-
-
-def reset():
-    # Makes sure 'resolve' function defined in plugin is used by ASAS
-    PluginBasedCR.start()
-
-    # Sets area of interest, flights exiting this area are deleted
-    limits_str = f"{LIMITS_LAT[0]-0.01} {LIMITS_LON[0]+0.01} {LIMITS_LAT[1]-0.01} {LIMITS_LON[1]+0.01}"
-    stack.stack(f"BOX Box1 {limits_str}")
-    stack.stack("AREA Box1")
