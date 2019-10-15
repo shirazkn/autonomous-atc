@@ -5,13 +5,19 @@ from numpy import random, cos, sin, deg2rad
 from bluesky import stack, traf
 from bluesky.traffic.asas import PluginBasedCR
 from bluesky.tools.geo import qdrdist
-# Other import-able modules : settings, navdb, sim, scr, tools
+from plugins.ML import ATC_2AC
+# Other BlueSky modules : settings, navdb, sim, scr, tools
 
-# Radius (in "Latitudes")
-RADIUS = 0.4
+from torch import tensor
+import torch.optim as optim
 
-# adius in nautical miles
-_, RADIUS_NM = qdrdist(-RADIUS, 0, 0, 0)
+# Radius of simulation area
+RADIUS = 0.4  # in "Latitudes"
+_, RADIUS_NM = qdrdist(-RADIUS, 0, 0, 0)  # in nautical miles
+
+# AI-Based conflict resolution
+atc_net = ATC_2AC.ATC_Net()
+optimizer = optim.SGD(atc_net.parameters(), lr=0.01, momentum=0.5)
 
 
 def init_plugin():
@@ -25,15 +31,7 @@ def init_plugin():
         'preupdate':       preupdate,
         'reset':           reset
         }
-
-    stackfunctions = {
-        'CHECK_PLUGIN': [
-            'CHECK_PLUGIN',
-            'txt',
-            check,
-            'Prints the values required to monitor performance of ML-based CR method.']
-    }
-
+    stackfunctions = {}
     return config, stackfunctions
 
 
@@ -46,17 +44,11 @@ def reset():
     stack.stack("AREA SimCirc")
 
 
-n_call_upd = 0
-
-
 def update():
     """
     Called every `update_interval` seconds
     """
-    global n_call_upd
-    n_call_upd += 1
-    if n_call_upd % 100 == 0:
-        stack.stack(f"ECHO Update called {n_call_upd} times..")
+    pass
 
 
 def preupdate():
@@ -64,27 +56,6 @@ def preupdate():
     if num_ac < 2:
         create_self_ac()
         create_enemy_ac()
-
-
-n_call_res = 0
-
-
-def resolve(asas, traf):
-    """
-    Called in place of built-in `resolve` method
-    """
-    global n_call_res
-    n_call_res += 1
-    if n_call_res % 10 == 0:
-        stack.stack(f"ECHO Resolve called {n_call_res} times..")
-
-
-def check(input_text):
-    """
-    Print plugin variables, for debugging/monitoring
-    For now, it just spits the input back into the console
-    """
-    stack.stack(f"ECHO CR_2Aircraft received input : '{input_text}'...")
 
 
 def create_self_ac():
@@ -106,3 +77,17 @@ def create_enemy_ac():
     pos_lon = -1 * RADIUS * sin(hdg_r)
     pos_lat = -1 * RADIUS * cos(hdg_r)
     stack.stack(f"CRE ENEMY B744 {pos_lat} {pos_lon} {hdg} FL200 400")
+
+
+def resolve(asas, traf):
+    """
+    Called in place of built-in `resolve` method
+    """
+    # TODO
+    atc_in = tensor([])
+    atc_out = atc_net(atc_in)
+    #  > Take action based on output
+    #  > Let simulation run for another step
+    #  loss = ATC_2AC.get_loss(atc_out, next_asas_state)
+    #  loss.backward()
+    #  optimizer.step()
