@@ -84,9 +84,14 @@ def resolve(asas, traf):
     Called in place of built-in `resolve` method
     """
     # TODO
-    atc_in = tensor([])
-    atc_out = atc_net(atc_in)
-    #  > Take action based on output
+    self = traf.id2idx('SELF')
+    enemy = traf.id2idx('ENEMY')
+
+    # Eventually needs to be done for each aircraft
+    # for confpair in asas.confpairs:
+    #     resolve
+        #  > Take action based on output
+
     #  > Let simulation run for another step
     #  loss = ATC_2AC.get_loss(atc_out, next_asas_state)
     #  loss.backward()
