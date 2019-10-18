@@ -10,7 +10,7 @@ from bluesky.tools.geo import qdrdist
 # Radius (in "Latitudes")
 RADIUS = 0.4
 
-# adius in nautical miles
+# Radius
 _, RADIUS_NM = qdrdist(-RADIUS, 0, 0, 0)
 
 
@@ -47,6 +47,7 @@ def reset():
 
 
 n_call_upd = 0
+n_call_res = 0
 
 
 def update():
@@ -55,8 +56,6 @@ def update():
     """
     global n_call_upd
     n_call_upd += 1
-    if n_call_upd % 100 == 0:
-        stack.stack(f"ECHO Update called {n_call_upd} times..")
 
 
 def preupdate():
@@ -66,17 +65,12 @@ def preupdate():
         create_enemy_ac()
 
 
-n_call_res = 0
-
-
 def resolve(asas, traf):
     """
     Called in place of built-in `resolve` method
     """
     global n_call_res
     n_call_res += 1
-    if n_call_res % 10 == 0:
-        stack.stack(f"ECHO Resolve called {n_call_res} times..")
 
 
 def check(input_text):
@@ -84,7 +78,11 @@ def check(input_text):
     Print plugin variables, for debugging/monitoring
     For now, it just spits the input back into the console
     """
-    stack.stack(f"ECHO CR_2Aircraft received input : '{input_text}'...")
+    global n_call_upd, n_call_res
+    stack.stack(f"ECHO Update called {n_call_upd} times..")
+    stack.stack(f"ECHO Resolve called {n_call_res} times..")
+    n_call_upd = 0
+    n_call_res = 0
 
 
 def create_self_ac():
