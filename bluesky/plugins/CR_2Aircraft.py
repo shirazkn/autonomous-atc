@@ -19,6 +19,10 @@ _, RADIUS_NM = qdrdist(-RADIUS, 0, 0, 0)  # in nautical miles
 atc_net = ATC_2AC.ATC_Net()
 optimizer = optim.SGD(atc_net.parameters(), lr=0.01, momentum=0.5)
 
+loss = tensor(0.0)
+output_tensor = tensor(0.0)
+running_loss = 0.0
+
 
 def init_plugin():
     reset()
@@ -48,14 +52,17 @@ def update():
     """
     Called every `update_interval` seconds
     """
-    pass
+    global running_loss
+    running_loss += ATC_2AC.accumulate_loss(traf.asas)
 
 
 def preupdate():
+    global loss
     num_ac = traf.ntraf
     if num_ac < 2:
         create_self_ac()
         create_enemy_ac()
+        loss = tensor(0.0)
 
 
 def create_self_ac():
@@ -83,16 +90,14 @@ def resolve(asas, traf):
     """
     Called in place of built-in `resolve` method
     """
-    # TODO
     self = traf.id2idx('SELF')
     enemy = traf.id2idx('ENEMY')
-
-    # Eventually needs to be done for each aircraft
-    # for confpair in asas.confpairs:
-    #     resolve
-        #  > Take action based on output
-
-    #  > Let simulation run for another step
-    #  loss = ATC_2AC.get_loss(atc_out, next_asas_state)
-    #  loss.backward()
-    #  optimizer.step()
+    global loss, output_tensor, running_loss
+    loss = ATC_2AC.cost_of_resolution(output_tensor, running_loss)
+    loss.backward()
+    optimizer.step()
+    qdr, dist = qdrdist(traf.lat[self], traf.lon[self], traf.lat[enemy], traf.lon[enemy])
+    rel_hdg = traf.hdg[enemy] - traf.hdg[self]
+    input_tensor = tensor([qdr, dist, rel_hdg])
+    output_tensor = atc_net.forward(input_tensor)
+    traf.hdg[self] += float(output_tensor)
