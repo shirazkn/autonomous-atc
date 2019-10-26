@@ -32,10 +32,10 @@ https://simulations.eurocontrol.int/solutions/bada-aircraft-performance-model/
 
 ### *PROBLEM OVERVIEW*
 #### DEFINITIONS <br>
-**Conflict-resolution / CR** : The preemptive action that's taken whenever two aircrafts are projected to collide with (or come dangerously close to) each other
+**Conflict-resolution / CR** : The preemptive action that's taken whenever two aircrafts are projected to collide with (or come dangerously close to) each other <br><br>
 **Agent** : The air traffic controller (or the neural net)<br><br>
 **State** : The float-valued column vector that has enough information embedded in it, to render each conflict-resolution time-step a Markov Decision Process. <br><br>
-**State-action space** : The sub-space of conflict-resolution actions that can be taken (and are admissible) at any given state.<br><br>
+**State-action space** : The subspace of state-action pairs that are admissible at any given state.<br><br>
 **Loss** : Inversely proportional to 'reward' in RL. ATC incurs a lower (or no) loss for more desirable conflict-resolution actions.<br><br>
 **Policy** : The relationship that maps the state to the optimal action at any CR time-step.
 
@@ -46,13 +46,13 @@ The 1-step temporal difference (TD) update equation is given by,
 
 <img src="images/qlearning_TD.png" alt="drawing" width="600"/> <br>
 <sup>Source : https://towardsdatascience.com/@takuma.seno </sup><br>
-where **Q(s,a)** is the expected return for taking action *a* at state *s*.
-Once our algorithm has converged (or once *Q* $\rightarrow$ *Q**), our policy would involve choosing actions that maximize this return.
+where Q(s,a) is the expected return for taking action *a* at state *s*.
+Once our algorithm has converged, our policy would involve choosing actions that maximize this return.
 #### NEURAL NETWORKS
 
 When the state-action space is continuous, it is infeasible to store Q-values for each {*s*, *a*} point, so we cannot use classical Q-learning.
 
-Instead, we use an incremental Neural Network that learns a continuous **Q-function** Q*(s,a). Once Q* is learnt, the optimal policy is then $\pi^*$ = *argmax*$_a$($Q^*(s,a)$).
+Instead, we use an incremental Neural Network that learns a continuous **Q-function** Q(s,a). Once Q is learnt (or once *Q* &rarr; *Q**), the optimal policy is then &pi;* = *argmax*<sub>a</sub>*Q**(s,a).
 
 The qualities desirable from a Q-Learning Neural Net implementation are,
 
@@ -63,10 +63,10 @@ The qualities desirable from a Q-Learning Neural Net implementation are,
 A setback that most naive DQN implementations suffer from is that of poor or non-convergence
 of the Q-function.
 A reason for this is the correlation between adjacent state-action transitions. For eg. consider a temporal difference update at {s,a}. 
-<br>
+
 <img src="images/iid_stateaction.png" alt="drawing" width="500"/> <br>
 <sup> Source: ? </sup>
-<br>
+
 The update also 'pulls' with it all the Q-values in its neighborhood - a consequence of approximating Q(s,a) with a continuous function.
 
 Two popular rectifications for this problem are :
@@ -76,10 +76,3 @@ recently experienced transitions. A drawback is that this cannot be extended to 
 - **Network Switching** : Developed by Deepmind and subsequently incorporated into Tensorflow, actions are taken based on one network,
 while the target Q-function is stored in another network that's kept frozen for T iterations. At the Tth iteration, both networks are synchronized.
 This solves the problem of having to 'chase a moving target'. This method is compatible with multi-step learning methods.
-
-Some specific DQN frameworks, with their drawbacks, are :
-- CMAC-based Q-Learning: Does not fulfil *Action Selection* criteria
-- Q-AHC: Does not fulfil *Generalization* requirements
-- Q-Kohonen, Q-Radial: Piecewise constant actions
-
-
