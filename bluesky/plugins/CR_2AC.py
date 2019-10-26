@@ -14,18 +14,17 @@ from torch.nn.functional import smooth_l1_loss, relu
 from random import sample as random_sample
 
 
-dHeading = 5  # Max heading allowed in one time-step
+dHeading = 2  # Max heading allowed in one time-step
 actions_enum = [-dHeading, 0.0, dHeading]  # Once of these actions given as a heading-change input
 VIEW_SIMULATIONS = False  # When True, simulations will be updated even if there's not conflict
-N_STEPS = 10  # Number of steps for TD implementation
-FINAL_REWARD = 20.0
+N_STEPS = 2  # Number of steps for TD implementation
+FINAL_REWARD = 0.0
 GAMMA = 1.0
 EXPLORATION_START = 0.9
 EXPLORATION_MIN = 0.3
-# EXPLORATION_DECAY = 0.9998
 EXPLORATION_DECAY = 0.999
 EXPLORATION = EXPLORATION_START
-TIMESTEP_PENALTY = -5
+REWARD_MULTIPLIER = 0.05
 
 COUNTER = 1
 
@@ -91,7 +90,7 @@ class Buffer:
     REWARD_PENDING = False
     memory = []
     size = 500
-    n_samples = 50
+    n_samples = 20
 
     def check_if_full(self, n_net: ATC_Net):
         if (len(self.memory) + 1) > self.size:
@@ -105,8 +104,8 @@ class Buffer:
             n_net.learn(transition_set)
 
     def get_samples(self):
-        samples = random_sample(range(len(self.memory)-N_STEPS), self.n_samples)
-        return [self.memory[s:s+N_STEPS] for s in samples]
+        samples = random_sample(range(len(self.memory)-N_STEPS+1), self.n_samples)
+        return [self.memory[s:s+N_STEPS + 1] for s in samples]
 
     def empty(self):
         self.memory = []
@@ -115,8 +114,8 @@ class Buffer:
         self.empty()
         self.TEACHING = (not option)
 
-    def terminate(self):
-        if len(self.memory) > N_STEPS:
+    def assign_terminal_reward(self):
+        if len(self.memory) > N_STEPS + 1:
             final_hdg = abs(traf.hdg[traf.id2idx('SELF')])
 
             final_reward = FINAL_REWARD*abs(cos(final_hdg * 0.5))
@@ -139,7 +138,7 @@ class Buffer:
 # Global variables for Neural Net
 atc_net = ATC_Net()
 buffer = Buffer()
-optimizer = optim.SGD(atc_net.parameters(), lr=0.0001, momentum=0.5)
+optimizer = optim.SGD(atc_net.parameters(), lr=0.0005, momentum=0.5)
 
 
 def init_plugin():
@@ -168,8 +167,12 @@ def init_plugin():
 
 
 def update():
-    if buffer.REWARD_PENDING:
-        buffer.assign_reward(TIMESTEP_PENALTY)
+    if len(traf.asas.confpairs):
+        if buffer.REWARD_PENDING:
+            buffer.assign_reward(get_reward_from_distance())
+    else:
+        buffer.assign_terminal_reward()
+
     buffer.check_if_full(atc_net)
 
 
@@ -177,8 +180,6 @@ def preupdate():
     if len(traf.asas.confpairs) < 1:
         if not VIEW_SIMULATIONS:
             reset_aircrafts()
-
-        buffer.terminate()
 
 
 def resolve(asas, traf):
@@ -234,7 +235,7 @@ def get_state():
     enemy_hdg = make_angle_convex(traf.hdg[enemy])
     rel_hdg = enemy_hdg - self_hdg
 
-    qdr, dist = qdrdist(traf.lat[self], traf.lon[self], traf.lat[enemy], traf.lon[enemy])
+    qdr, dist = _qdrdist(traf.lat[self], traf.lon[self], traf.lat[enemy], traf.lon[enemy])
     qdr = make_angle_convex(qdr)
     return tensor([qdr + self_hdg, dist, rel_hdg])
 
@@ -256,3 +257,14 @@ def check_net():
     import pdb
     pdb.set_trace()
 
+
+def get_reward_from_distance():
+    _, dist = _qdrdist(traf.lat[0], traf.lon[0], traf.lat[1], traf.lon[1])
+    return - REWARD_MULTIPLIER/max(dist, 0.001)
+
+
+def _qdrdist(lat1, lon1, lat2, lon2):
+    """
+    Prevents BlueSky's qdrdist function from returning singular value
+    """
+    return qdrdist(lat1, lon1, lat2 + 0.0001, lon2)
