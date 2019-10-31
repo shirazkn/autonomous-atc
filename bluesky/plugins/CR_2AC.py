@@ -14,19 +14,25 @@ from torch.nn.functional import smooth_l1_loss, relu
 from random import sample as random_sample
 
 
-dHeading = 2  # Max heading allowed in one time-step
-actions_enum = [-dHeading, 0.0, dHeading]  # Once of these actions given as a heading-change input
+dHeading = 4  # Max heading allowed in one time-step
+actions_enum = [-dHeading, 0,  dHeading]  # Once of these actions given as a heading-change input
 VIEW_SIMULATIONS = False  # When True, simulations will be updated even if there's not conflict
 N_STEPS = 2  # Number of steps for TD implementation
-FINAL_REWARD = 0.0
-GAMMA = 1.0
+
+GAMMA = 1.0  # Discount factor
+FINAL_REWARD = 0.0  # Reward assigned when conflict is resolved
+REWARD_MULTIPLIER = 5  # Reward is (-1*REWARD_MULTIPLIER)/(distance_of_separation)
+ACTION_COST = -1.0
+LEARNING_RATE = 0.01
+
 EXPLORATION_START = 0.9
 EXPLORATION_MIN = 0.3
 EXPLORATION_DECAY = 0.999
 EXPLORATION = EXPLORATION_START
-REWARD_MULTIPLIER = 0.05
 
-COUNTER = 1
+
+COUNTER = 1  # Debug counter, to print values during TD update
+UPDATE_COUNTER = 1  # Debug counter, to print values during TD update
 
 
 # PyTorch Neural Net
@@ -40,7 +46,7 @@ class ATC_Net(nn.Module):
         self.fcH1 = nn.Linear(5, 10)
         self.fcH2 = nn.Linear(10, 10)
         self.fcH3 = nn.Linear(10, 5)
-        self.fcOut = nn.Linear(5, 3)
+        self.fcOut = nn.Linear(5, len(actions_enum))
 
     def forward(self, x):
         x = self.fcOut(self.fcH3(relu(self.fcH2(relu(self.fcH1(self.fcInp(x)))))))
@@ -75,11 +81,11 @@ class ATC_Net(nn.Module):
 
         global COUNTER
         COUNTER += 1
-        print(f"My q_value is {q_value} and my td_target is {td_target}.") if not (COUNTER % 100) else None
+        print(f"My q_value is {q_value} and my td_target is {td_target}.") if not (COUNTER % 20) else None
         loss = smooth_l1_loss(q_value, td_target)
         loss.backward()
         optimizer.step()
-        print(f"q_value updated to {self.forward(this_state)[this_action]}") if not (COUNTER % 100) else None
+        print(f"q_value updated to {self.forward(this_state)[this_action]}") if not (COUNTER % 20) else None
 
         global EXPLORATION
         EXPLORATION = max(EXPLORATION_DECAY*EXPLORATION, EXPLORATION_MIN)
@@ -90,7 +96,7 @@ class Buffer:
     REWARD_PENDING = False
     memory = []
     size = 500
-    n_samples = 20
+    n_samples = 10
 
     def check_if_full(self, n_net: ATC_Net):
         if (len(self.memory) + 1) > self.size:
@@ -116,9 +122,9 @@ class Buffer:
 
     def assign_terminal_reward(self):
         if len(self.memory) > N_STEPS + 1:
-            final_hdg = abs(traf.hdg[traf.id2idx('SELF')])
-
-            final_reward = FINAL_REWARD*abs(cos(final_hdg * 0.5))
+            # final_hdg = abs(traf.hdg[traf.id2idx('SELF')])
+            # final_reward = FINAL_REWARD*abs(cos(final_hdg * 0.5))
+            final_reward = FINAL_REWARD
             self.assign_reward(final_reward)
             self.REWARD_PENDING = False
             self.memory[-1].append("TERMINATED")
@@ -133,12 +139,24 @@ class Buffer:
     def assign_reward(self, reward):
         self.memory[-1] = self.memory[-1][:2] + [reward]
         self.REWARD_PENDING = False
+        self.check_if_full(atc_net)
+
+
+def weights_init(m):
+    classname = m.__class__.__name__
+    # For every Linear layer in a model,
+    if classname.find('Linear') != -1:
+        # Use a uniform distribution for weights
+        m.weight.data.uniform_(-0.001, 0.0)
+        # Set bias to 0
+        m.bias.data.fill_(g)
 
 
 # Global variables for Neural Net
 atc_net = ATC_Net()
+atc_net.apply(weights_init)
 buffer = Buffer()
-optimizer = optim.SGD(atc_net.parameters(), lr=0.0005, momentum=0.5)
+optimizer = optim.SGD(atc_net.parameters(), lr=LEARNING_RATE, momentum=0.5)
 
 
 def init_plugin():
@@ -166,18 +184,16 @@ def init_plugin():
     return config, stackfunctions
 
 
-def update():
-    if len(traf.asas.confpairs):
-        if buffer.REWARD_PENDING:
-            buffer.assign_reward(get_reward_from_distance())
-    else:
+def preupdate():
+    if not len(traf.asas.confpairs):
         buffer.assign_terminal_reward()
 
-    buffer.check_if_full(atc_net)
 
-
-def preupdate():
-    if len(traf.asas.confpairs) < 1:
+def update():
+    global UPDATE_COUNTER
+    UPDATE_COUNTER += 1
+    if not len(traf.asas.confpairs):
+        # If there's no conflict, reset simulation
         if not VIEW_SIMULATIONS:
             reset_aircrafts()
 
@@ -186,6 +202,9 @@ def resolve(asas, traf):
     """
     Called in place of built-in `resolve` method
     """
+    if buffer.REWARD_PENDING:
+        buffer.assign_reward(get_reward_for_distance() + get_reward_for_action())
+
     # Choose action
     state = get_state()
     q_values = atc_net.forward(state)
@@ -247,20 +266,35 @@ def get_action(q_values):
     """
     sample = random.uniform(0, 1)
     if sample < EXPLORATION:
-        return random.randint(3)
+        return random.randint(len(actions_enum))
 
     else:
         return q_values.max(0)[1]
 
 
 def check_net():
+    """
+    Use BlueSky command CHECK_NET to open pdb here
+    """
     import pdb
     pdb.set_trace()
 
 
-def get_reward_from_distance():
+def get_reward_for_distance():
+    """
+    :return: Negative reward inversely proportional to distance of separation
+    """
     _, dist = _qdrdist(traf.lat[0], traf.lon[0], traf.lat[1], traf.lon[1])
-    return - REWARD_MULTIPLIER/max(dist, 0.001)
+
+    return - REWARD_MULTIPLIER/max(dist, 0.5)
+
+
+def get_reward_for_action():
+    """
+    :return:
+    """
+    last_action = actions_enum[buffer.memory[-1][1]]
+    return ACTION_COST if last_action else 0.0
 
 
 def _qdrdist(lat1, lon1, lat2, lon2):
