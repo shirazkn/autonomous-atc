@@ -31,11 +31,13 @@ def reset():
     # Sets area of interest, flights exiting this area are deleted
     stack.stack(f"CIRCLE SimCirc 0 0 {RADIUS_NM}")
     stack.stack("AREA SimCirc")
+    reset_aircrafts()
 
 
 def preupdate():
-    if traf.ntraf < 2:
-        reset_aircrafts()
+    # if traf.ntraf < 2:
+    #     reset_aircrafts()
+    pass
 
 
 def create_self_ac():
@@ -60,7 +62,11 @@ def create_enemy_ac():
 
 
 def reset_aircrafts():
-    stack.stack(f"DEL SELF")
-    stack.stack(f"DEL ENEMY")
+    delete_aircrafts()
     create_self_ac()
     create_enemy_ac()
+
+
+def delete_aircrafts():
+    stack.stack(f"DEL SELF")
+    stack.stack(f"DEL ENEMY")
