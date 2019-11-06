@@ -3,7 +3,7 @@
 # CR is done using a net with Experience Replay
 
 from numpy import random
-from bluesky import traf
+from bluesky import traf, stack
 from bluesky.traffic.asas import PluginBasedCR
 from bluesky.tools.geo import qdrdist
 from plugins.Sim_2AC import reset_aircrafts
@@ -19,7 +19,7 @@ VIEW_SIMULATIONS = False  # When True, simulations will be updated even if there
 
 GAMMA = 1.0  # Discount factor
 FINAL_REWARD = 0.0  # <FINAL_REWARD> reward assigned when conflict is resolved (terminal state)
-SEPARATION_COST_FACTOR = 10  # <-R_M/(distance_of_separation)> reward every time-step
+SEPARATION_COST_FACTOR = 10  # <-R_M/(distance_of_separation)^2> reward every time-step
 ACTION_COST = 10.0  # <-1*ACTION_COST> reward for changing heading
 
 LEARNING_RATE = 0.005
@@ -79,7 +79,7 @@ class ATC_Net(nn.Module):
 
         global EXPLORATION, COUNTER
         EXPLORATION = max(EXPLORATION_DECAY*EXPLORATION, EXPLORATION_MIN)
-        if not COUNTER % 500:
+        if not COUNTER % 1000:
             print(f"Exploration is {EXPLORATION}, return was {returns[0]}.")
 
 
@@ -198,7 +198,8 @@ def resolve():
     buffer.add_state_action(state, action)
 
     # Execute action
-    traf.hdg[traf.id2idx('SELF')] += float(actions_enum[action])
+    hdgval = traf.hdg[traf.id2idx('SELF')] + float(actions_enum[action])
+    stack.stack(f"HDG SELF {hdgval}")
 
 
 def set_view(input_text):
