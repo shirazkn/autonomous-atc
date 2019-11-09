@@ -8,7 +8,7 @@ from bluesky.tools.geo import qdrdist
 # Radius (in "Latitudes")
 RADIUS = 0.4
 
-# Radius
+# Radius (in nautical miles)
 _, RADIUS_NM = qdrdist(-RADIUS, 0, 0, 0)
 
 
@@ -35,8 +35,6 @@ def reset():
 
 
 def preupdate():
-    # if traf.ntraf < 2:
-    #     reset_aircrafts()
     pass
 
 

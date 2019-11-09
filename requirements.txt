@@ -10,3 +10,4 @@ msgpack
 pandas
 
 torch
+mayavi
