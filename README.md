@@ -4,6 +4,7 @@ We are using reinforcement learning to develop an air-traffic controller DQN. He
 <br>
 
 I'm currently implementing 2-aircraft conflict-resolution, to eventually be generalized to *n* aircrafts...
+See the branch `simple-RL-controller`.
 
 
 ***
@@ -35,19 +36,26 @@ https://simulations.eurocontrol.int/solutions/bada-aircraft-performance-model/
 **Conflict-resolution / CR** : The preemptive action that's taken whenever two aircrafts are projected to collide with (or come dangerously close to) each other <br><br>
 **Agent** : The air traffic controller (or the neural net)<br><br>
 **State** : The float-valued column vector that has enough information embedded in it, to render each conflict-resolution time-step a Markov Decision Process. <br><br>
-**State-action space** : The subspace of state-action pairs that are admissible at any given state.<br><br>
+**State-action space** : The subspace of state-action pairs that are allowed at any given state.<br><br>
 **Loss** : Inversely proportional to 'reward' in RL. ATC incurs a lower (or no) loss for more desirable conflict-resolution actions.<br><br>
 **Policy** : The relationship that maps the state to the optimal action at any CR time-step.
 
 ***
 
-#### TD-LEARNING
-The 1-step temporal difference (TD) update equation is given by,
+#### REINFORCEMENT LEARNING METHODS
+The 1-step monte-carlo update equation is given by,
 
-<img src="images/qlearning_TD.png" alt="drawing" width="600"/> <br>
-<sup>Source : https://towardsdatascience.com/@takuma.seno </sup><br>
+<img src="images/MC_update.png" alt="drawing" width="400"/> <br>
+
+whereas the 1-step temporal difference (TD) update equation is given by,
+
+<img src="images/TD_update.png" alt="drawing" width="600"/> <br>
+<sup>Source : Sutton & Barto </sup><br>
 where Q(s,a) is the expected return for taking action *a* at state *s*.
 Once our algorithm has converged, our policy would involve choosing actions that maximize this return.
+
+Of the two options, Monte-Carlo has lower bias and higher variance. However, we choose to use MC over TD, because MC does not 
+involve bootstrapping (updating an estimate towards an estimate). So it is much more stable and less sensitive to hyper-parameters.
 #### NEURAL NETWORKS
 
 When the state-action space is continuous, it is infeasible to store Q-values for each {*s*, *a*} point, so we cannot use classical Q-learning.
@@ -56,13 +64,12 @@ Instead, we use an incremental Neural Network that learns a continuous **Q-funct
 
 The qualities desirable from a Q-Learning Neural Net implementation are,
 
-<img src="images/QL_essentials.png" alt="drawing" width="400"/> <br>
+<img src="images/QL_essentials.png" alt="drawing" width="600"/> <br>
 <sup> Source: http://users.cecs.anu.edu.au/~rsl/rsl_papers/99ai.kambara.pdf </sup>
 
+#### DECORRELATION OF STATES
 
-A setback that most naive DQN implementations suffer from is that of poor or non-convergence
-of the Q-function.
-A reason for this is the correlation between adjacent state-action transitions. For eg. consider a temporal difference update at {s,a}. 
+A naive implementation of a DQN is very likely to diverge due to the correlation between adjacent state-action transitions. For eg. consider a temporal difference update at {s,a}. 
 
 <img src="images/iid_stateaction.png" alt="drawing" width="500"/> <br>
 <sup> Source: ? </sup>
