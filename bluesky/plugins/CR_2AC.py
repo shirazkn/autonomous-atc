@@ -5,13 +5,12 @@ Author : Shiraz Khan
 
 from bluesky import traf, stack
 from bluesky.tools.geo import qdrdist
-from plugins.Sim_2AC import reset_aircrafts
+from plugins.Sim_2AC import reset_aircrafts, RADIUS_NM
 
 from torch import tensor, Tensor, nn
 from torch.nn.functional import smooth_l1_loss, relu
 import torch.optim as optim
 
-from numpy import random
 from random import sample as random_sample
 import numpy as np
 import matplotlib.pyplot as plt
@@ -22,19 +21,20 @@ from mpl_toolkits import mplot3d
 # ----- Problem Specifications ----- #
 dHeading = 5  # Max heading allowed in one time-step
 actions_enum = [-dHeading, 0,  dHeading]  # Once of these actions given as a heading-change input
-RESOLVE_PERIOD = 100
-MIN_SEPARATION = 4.0
+RESOLVE_PERIOD = 300  # Every ___ steps of simulation, take conflict-resolution action
+MIN_SEPARATION_ALLOWED = 4.0  # Negative reward is incurred if aircrafts come closer than this
 
 # ----- Reinforcement Learning Specifications ----- #
-ACTION_COST = 3.0  # <-1*ACTION_COST> reward for changing heading
-SEPARATION_COST = 20.0
+ACTION_COST = 10.0  # <-1*ACTION_COST> reward for changing heading
+SEPARATION_COST = 400.0  # Penalty assigned the terminal state, based on minimum separation during episode
+# ORIENTATION_COST = 20.0  # Incentive to correct the orientation after conflict-resolution
 
-LEARNING_RATE = 0.05
-TRAINING_RATIO = 0.3  # Fraction of the episode to learn from
+LEARNING_RATE = 0.01
+TRAINING_RATIO = 0.1  # Fraction of the episode to learn from
 
 EXPLORATION_START = 0.9
 EXPLORATION_MIN = 0.1
-EXPLORATION_DECAY = 0.999
+EXPLORATION_DECAY = 0.9995
 
 # ----- Debugging and Simulation Parameters ----- #
 VIEW_SIMULATIONS = False  # When True, simulations will be updated even if there's not conflict
@@ -42,6 +42,9 @@ DEBUGGING = False
 
 EXPLORATION = EXPLORATION_START
 COUNTER = 0
+MIN_SEPARATION = float(2*RADIUS_NM)
+TERMINAL_REWARD = 0.0
+EPISODE_COUNT = 0
 
 
 # PyTorch Neural Net
@@ -87,9 +90,10 @@ class ATC_Net(nn.Module):
             loss.backward()
             optimizer.step()
 
-        global EXPLORATION
+        global EXPLORATION, EPISODE_COUNT
+        EPISODE_COUNT += 1
         EXPLORATION = max(EXPLORATION_DECAY*EXPLORATION, EXPLORATION_MIN)
-        print(f"Exploration is {EXPLORATION}, return was {returns[0]}.")
+        print(f"{EPISODE_COUNT} : Exploration is {EXPLORATION}, return was {returns[0]}, with minimum separation {MIN_SEPARATION}.")
 
 
 class Buffer:
@@ -182,31 +186,51 @@ def preupdate():
     if not COUNTER % RESOLVE_PERIOD:
         COUNTER = 0
 
-        # If aircrafts are still in simulation area
-        if traf.ntraf == 2:
+        # Check if aircrafts haven't been created yet
+        if not traf.ntraf:
+            return
+
+        # Check if SELF is still in simulation area
+        _, self_dist = _qdrdist(traf.lat[0], traf.lon[0], 0.0, 0.0)
+        if self_dist < RADIUS_NM + 0.5:
             try:
+                # Take CR action
                 resolve()
             except RuntimeError:
                 # Discard episode and continue
-                buffer.empty()
-                reset_aircrafts()
+                reset_all()
 
-        # Else, conclude episode and update neural net
-        else:
-            del buffer.memory[-1]
+        # If SELF has left the area, conclude episode and update neural net
+        elif buffer.REWARD_PENDING:
+            buffer.assign_reward(get_reward_for_action() + get_reward_for_distance())
             buffer.teach(atc_net)
-            buffer.empty()
-            reset_aircrafts()
+            reset_all()
+            # TODO : Use _qdrdist(0.0, 0.0, LAT[0], LON[0])[0] in input vector to correct the trajectory
+
+
+def reset_all():
+    """
+    Resets values after one batch of experience has been trained
+    """
+    global MIN_SEPARATION
+    MIN_SEPARATION = float(2*RADIUS_NM)
+    buffer.empty()
+    reset_aircrafts()
 
 
 def update():
-    pass
+    # Find the minimum separation maintained by the aircrafts in this episode
+    global MIN_SEPARATION
+
+    if traf.ntraf > 1:
+        _, dist = _qdrdist(traf.lat[0], traf.lon[0], traf.lat[1], traf.lon[1])
+        MIN_SEPARATION = np.min([MIN_SEPARATION, dist])
 
 
 def resolve():
     # Assign reward for previous state-action
     if buffer.REWARD_PENDING:
-        buffer.assign_reward(get_reward_for_distance() + get_reward_for_action())
+        buffer.assign_reward(get_reward_for_action())
 
     # Choose action for current time-step
     state = get_state()
@@ -263,10 +287,9 @@ def get_action(q_values):
 
 def get_reward_for_distance():
     """
-    :return: <float> Negative reward if minimum separation condition is violated
+    :return: <float> Negative reward if minimum separation condition was violated during episode
     """
-    _, dist = _qdrdist(traf.lat[0], traf.lon[0], traf.lat[1], traf.lon[1])
-    if dist < MIN_SEPARATION:
+    if MIN_SEPARATION < MIN_SEPARATION_ALLOWED:
         return -1*SEPARATION_COST
     else:
         return 0.0
@@ -293,8 +316,8 @@ def show_net():
     Use BlueSky command SHOW_NET
     """
     mlab.clf()
-    x = np.linspace(-180, 180, 60)
-    y = np.linspace(-180, 180, 60)
+    x = np.linspace(-180, 180, 100)
+    y = np.linspace(-180, 180, 100)
     X, Y = np.meshgrid(x, y)
 
     Z_Left = []
@@ -324,8 +347,8 @@ def show_net():
     mlab.title("Values for LEFT (g) and RIGHT (r)")
     mlab.show()
 
-    plt.contourf(X, Y, Z_Contour, levels=5, colors=('g', 'b', 'r'))
-    plt.show()
+    # plt.contourf(X, Y, Z_Contour, levels=5, colors=('g', 'b', 'r'))
+    # plt.show()
 
 
 def check_net():

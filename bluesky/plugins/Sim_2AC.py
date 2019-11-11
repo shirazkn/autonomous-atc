@@ -1,5 +1,7 @@
-# Plugin for implementing ML-based conflict-resolution method
-# Simulates continuing 2-aircraft episodes to learn CR policy
+"""
+Plugin for simulating 2-aircraft conflict episodes, to train a conflict-resolution DQN
+Author : Shiraz Khan
+"""
 
 from numpy import random, cos, sin, deg2rad
 from bluesky import stack, traf
@@ -30,7 +32,7 @@ def init_plugin():
 def reset():
     # Sets area of interest, flights exiting this area are deleted
     stack.stack(f"CIRCLE SimCirc 0 0 {RADIUS_NM}")
-    stack.stack("AREA SimCirc")
+    # stack.stack("AREA SimCirc")  ~~ This is now being done explicitly in plugins.CR_2AC.preupdate()
     reset_aircrafts()
 
 
@@ -60,6 +62,10 @@ def create_enemy_ac():
 
 
 def reset_aircrafts():
+    """
+    Creates both aircrafts.
+    Note : CR_2AC relies on the order of creation
+    """
     delete_aircrafts()
     create_self_ac()
     create_enemy_ac()
