@@ -26,13 +26,13 @@ MIN_SEPARATION_ALLOWED = 4.0  # Negative reward is incurred if aircrafts come cl
 
 # ----- Reinforcement Learning Specifications ----- #
 ACTION_COST = 10.0  # <-1*ACTION_COST> reward for changing heading
-SEPARATION_COST = 400.0  # Penalty assigned the terminal state, based on minimum separation during episode
+SEPARATION_COST = 1000.0  # Penalty assigned the terminal state, based on minimum separation during episode
 # ORIENTATION_COST = 20.0  # Incentive to correct the orientation after conflict-resolution
 
 LEARNING_RATE = 0.01
 TRAINING_RATIO = 0.1  # Fraction of the episode to learn from
 
-EXPLORATION_START = 0.9
+EXPLORATION_START = 1.0
 EXPLORATION_MIN = 0.1
 EXPLORATION_DECAY = 0.9995
 
@@ -54,14 +54,11 @@ class ATC_Net(nn.Module):
         super(ATC_Net, self).__init__()
 
         # Network input & output layers
-        self.fcInp = nn.Linear(3, 5)
-        self.fcH1 = nn.Linear(5, 5)
-        self.fcH2 = nn.Linear(5, 5)
-        self.fcH3 = nn.Linear(5, 4)
-        self.fcOut = nn.Linear(4, len(actions_enum))
+        self.fcInp = nn.Linear(3, 20)
+        self.fcOut = nn.Linear(20, len(actions_enum))
 
     def forward(self, x):
-        x = self.fcOut(self.fcH3(relu(self.fcH2(relu(self.fcH1(self.fcInp(x)))))))
+        x = self.fcOut(relu(self.fcInp(x)))
         return x
 
     def learn(self, training_set):
@@ -69,6 +66,7 @@ class ATC_Net(nn.Module):
         Learn Q-function using monte-carlo learning
         :param training_set: <list> Indices of buffer.memory to train
         """
+        global DEBUGGING
         n_transitions = len(buffer.memory)
 
         # Compute total return for each state-action
@@ -78,6 +76,10 @@ class ATC_Net(nn.Module):
             total_return += buffer.memory[-1-i][2]
             returns.append(total_return)
         returns = returns[::-1]
+
+        if DEBUGGING:
+        	DEBUGGING = False
+        	pdb.set_trace()
 
         # Update Q for each state-action pair in training_set
         for t in training_set:
