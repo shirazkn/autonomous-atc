@@ -32,7 +32,6 @@ from . import Eby
 from . import MVP
 from . import Swarm
 from . import SSD
-from . import PluginBasedCR
 
 
 class ASAS(TrafficArrays):
@@ -43,7 +42,7 @@ class ASAS(TrafficArrays):
     CDmethods = {"STATEBASED": StateBasedCD}
 
     # Dictionary of CR methods
-    CRmethods = {"OFF": DoNothing, "MVP": MVP, "EBY": Eby, "SWARM": Swarm, "PLUGIN_CR": PluginBasedCR}
+    CRmethods = {"OFF": DoNothing, "MVP": MVP, "EBY": Eby, "SWARM": Swarm}
     # If pyclipper is installed add it to CRmethods-dict
     if SSD.loaded_pyclipper():
         CRmethods["SSD"] = SSD

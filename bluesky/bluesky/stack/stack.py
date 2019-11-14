@@ -23,7 +23,7 @@ import subprocess
 import numpy as np
 from matplotlib import colors
 import bluesky as bs
-from bluesky.tools import geo, areafilter, plugin, plotter
+from bluesky.tools import geo, areafilter, plugin, plotter, simtime
 from bluesky.tools.aero import kts, ft, fpm, tas2cas, density
 from bluesky.tools.misc import txt2alt, tim2txt, cmdsplit
 from bluesky.tools import varexplorer as ve
@@ -83,6 +83,7 @@ cmdsynon = {
     "POLYLINES": "POLYLINE",
     "PRINT": "ECHO",
     "Q": "QUIT",
+    "RT": "REALTIME",
     "RTF": "DTMULT",
     "STOP": "QUIT",
     "RUN": "OP",
@@ -207,7 +208,7 @@ def init(startup_scnfile):
         "ADDNODES": [
             "ADDNODES number",
             "int",
-            bs.sim.addnodes,
+            bs.net.addnodes,
             "Add a simulation instance/node",
         ],
         "ADDWPT": [
@@ -419,7 +420,7 @@ def init(startup_scnfile):
         "DT": [
             "DT [dt] OR [target,dt]",
             "[float/txt,float]",
-            lambda *args: bs.sim.setdt(*reversed(args)),
+            lambda *args: simtime.setdt(*reversed(args)),
             "Set simulation time step",
         ],
         "DTLOOK": [
@@ -431,7 +432,7 @@ def init(startup_scnfile):
         "DTMULT": [
             "DTMULT multiplier",
             "float",
-            bs.sim.setDtMultiplier,
+            bs.sim.set_dtmult,
             "Sel multiplication factor for fast-time simulation",
         ],
         "DTNOLOOK": [
@@ -473,8 +474,8 @@ def init(startup_scnfile):
         "FIXDT": [
             "FIXDT ON/OFF [tend]",
             "onoff,[time]",
-            bs.sim.setFixdt,
-            "Fix the time step",
+            lambda flag, *args: bs.sim.ff(*args) if flag else bs.op(),
+            "Legacy function for TMX compatibility",
         ],
         "GETWIND": [
             "GETWIND lat,lon,[alt]",
@@ -503,7 +504,7 @@ def init(startup_scnfile):
             lambda *args: bs.scr.echo(showhelp(*args)),
             "Show help on a command, show pdf or write list of commands to file",
         ],
-        "HOLD": ["HOLD", "", bs.sim.pause, "Pause(hold) simulation"],
+        "HOLD": ["HOLD", "", bs.sim.hold, "Pause(hold) simulation"],
         "IC": [
             "IC [IC/filename]",
             "[string]",
@@ -589,7 +590,7 @@ def init(startup_scnfile):
             bs.traf.asas.SetNoreso,
             "Switch off conflict resolution for this aircraft",
         ],
-        "OP": ["OP", "", bs.sim.op, "Start/Run simulation or continue after pause"],
+        "OP": ["OP", "", bs.sim.op, "Start/Run simulation or continue after hold"],
         "ORIG": [
             "ORIG acid, latlon/airport",
             "acid,wpt/latlon",
@@ -616,7 +617,7 @@ def init(startup_scnfile):
         ],
         "PLOT": [
             "PLOT [x], y [,dt,color,figure]",
-            "word,[word,float,txt,int]",
+            "[word,word,float,txt,int]",
             plotter.plot,
             "Create a graph of variables x versus y.",
         ],
@@ -659,6 +660,11 @@ def init(startup_scnfile):
             "Define priority rules (right of way) for conflict resolution",
         ],
         "QUIT": ["QUIT", "", bs.sim.stop, "Quit program/Stop simulation"],
+        "REALTIME": [
+            "REALTIME [ON/OFF]",
+            "[bool]",
+            bs.sim.realtime,
+            "En-/disable realtime running allowing a variable timestep."],
         "RESET": ["RESET", "", bs.sim.reset, "Reset simulation"],
         "RFACH": [
             "RFACH [factor]",
@@ -1225,10 +1231,9 @@ def ic(filename=""):
 
 def checkscen():
     """ Check if commands from the scenario buffer need to be stacked. """
-    while len(scencmd) > 0 and bs.sim.simt >= scentime[0]:
-        stack(scencmd[0])
-        del scencmd[0]
-        del scentime[0]
+    while scencmd and bs.sim.simt >= scentime[0]:
+        stack(scencmd.pop(0))
+        scentime.pop(0)
 
 
 def saveic(fname=None):
@@ -1236,8 +1241,8 @@ def saveic(fname=None):
     global savefile, saveexcl, saveict0
 
     # No args? Give current status
-    if fname == "" or fname == None:
-        if savefile == None:
+    if not fname:
+        if savefile is None:
             return False
         else:
             return True, "SAVEIC is already on\n" + "File: " + savefile.name
@@ -1248,7 +1253,7 @@ def saveic(fname=None):
         savefile = None
         return True
 
-    elif fname[:6].upper() == "EXCEPT":
+    if fname[:6].upper() == "EXCEPT":
         if len(fname.strip()) == 6:  # Only except:
             return True, "EXCEPT is now: " + " ".join(saveexcl)
 
@@ -1261,7 +1266,7 @@ def saveic(fname=None):
         return True
 
     # If recording is already on, give message
-    if savefile != None:
+    if savefile is not None:
         return False, "SAVEIC is already on\n" + "Savefile:  " + savefile.name
 
     # Add extension .scn if not already present
@@ -1422,10 +1427,11 @@ def getnextarg(line):
 
 
 def process():
-    global savefile, saveexcl, orgcmd
-
     """process and empty command stack"""
-    global sender_rte
+    global savefile, saveexcl, orgcmd, sender_rte
+
+    # First check for commands in scenario file
+    checkscen()
 
     # Process stack of commands
     # for (line, sender_rte) in cmdstack:
