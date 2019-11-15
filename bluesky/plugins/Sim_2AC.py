@@ -11,7 +11,9 @@ from bluesky.tools.geo import qdrdist
 RADIUS = 0.4
 
 # Radius (in nautical miles)
-_, RADIUS_NM = qdrdist(-RADIUS, 0, 0, 0)
+_, RADIUS_NM = qdrdist(-RADIUS, 0.0, 0.0, 0.0)
+
+AIRCRAFTS = ["ONE", "TWO"]
 
 
 def init_plugin():
@@ -30,7 +32,7 @@ def init_plugin():
 
 
 def reset():
-    # Sets area of interest, flights exiting this area are deleted
+    # Visualize simulation area
     stack.stack(f"CIRCLE SimCirc 0 0 {RADIUS_NM}")
     # stack.stack("AREA SimCirc")  ~~ This is now being done explicitly in plugins.CR_2AC.preupdate()
     reset_aircrafts()
@@ -40,17 +42,7 @@ def preupdate():
     pass
 
 
-def create_self_ac():
-    """
-    Create aircraft going from South to North
-    """
-    pos_lat = -RADIUS
-    pos_lon = 0
-    hdg = 0
-    stack.stack(f"CRE SELF B744 {pos_lat} {pos_lon} {hdg} FL200 400")
-
-
-def create_enemy_ac():
+def create_ac(ID):
     """
     Create aircraft coming inwards from a random point on circumference
     """
@@ -58,7 +50,7 @@ def create_enemy_ac():
     hdg_r = deg2rad(hdg)
     pos_lon = -1 * RADIUS * sin(hdg_r)
     pos_lat = -1 * RADIUS * cos(hdg_r)
-    stack.stack(f"CRE ENEMY B744 {pos_lat} {pos_lon} {hdg} FL200 400")
+    stack.stack(f"CRE {ID} B744 {pos_lat} {pos_lon} {hdg} FL200 400")
 
 
 def reset_aircrafts():
@@ -67,10 +59,10 @@ def reset_aircrafts():
     Note : CR_2AC relies on the order of creation
     """
     delete_aircrafts()
-    create_self_ac()
-    create_enemy_ac()
+    for ID in AIRCRAFTS:
+        create_ac(ID)
 
 
 def delete_aircrafts():
-    stack.stack(f"DEL SELF")
-    stack.stack(f"DEL ENEMY")
+    for ID in AIRCRAFTS:
+        stack.stack(f"DEL {ID}")

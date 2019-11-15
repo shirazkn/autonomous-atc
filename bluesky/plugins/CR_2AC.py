@@ -5,9 +5,9 @@ Author : Shiraz Khan
 
 from bluesky import traf, stack
 from bluesky.tools.geo import qdrdist
-from plugins.Sim_2AC import reset_aircrafts, RADIUS_NM
+from plugins.Sim_2AC import reset_aircrafts, RADIUS_NM, AIRCRAFTS
 
-from torch import tensor, Tensor, nn
+import torch
 from torch.nn.functional import smooth_l1_loss, relu
 import torch.optim as optim
 
@@ -25,45 +25,46 @@ RESOLVE_PERIOD = 300  # Every ___ steps of simulation, take conflict-resolution 
 MIN_SEPARATION_ALLOWED = 4.0  # Negative reward is incurred if aircrafts come closer than this
 
 # ----- Reinforcement Learning Specifications ----- #
-ACTION_COST = 10.0  # <-1*ACTION_COST> reward for changing heading
+ACTION_COST = 20.0  # <-1*ACTION_COST> reward for changing heading
 SEPARATION_COST = 1000.0  # Penalty assigned the terminal state, based on minimum separation during episode
 # ORIENTATION_COST = 20.0  # Incentive to correct the orientation after conflict-resolution
 
-LEARNING_RATE = 0.01
+LEARNING_RATE = 0.005
 TRAINING_RATIO = 0.1  # Fraction of the episode to learn from
 
 EXPLORATION_START = 1.0
 EXPLORATION_MIN = 0.1
-EXPLORATION_DECAY = 0.9995
+EXPLORATION_DECAY = 0.9999
 
 # ----- Debugging and Simulation Parameters ----- #
 VIEW_SIMULATIONS = False  # When True, simulations will be updated even if there's not conflict
 DEBUGGING = False
 
+SAVED_STATE = None
+# SAVED_STATE = "saved_data/atc-policy-1.pt"
 EXPLORATION = EXPLORATION_START
 COUNTER = 0
-MIN_SEPARATION = float(2*RADIUS_NM)
-TERMINAL_REWARD = 0.0
 EPISODE_COUNT = 0
 
 
 # PyTorch Neural Net
-class ATC_Net(nn.Module):
+class ATC_Net(torch.nn.Module):
 
     def __init__(self):
         super(ATC_Net, self).__init__()
 
         # Network input & output layers
-        self.fcInp = nn.Linear(3, 20)
-        self.fcOut = nn.Linear(20, len(actions_enum))
+        self.fcInp = torch.nn.Linear(3, 20)
+        self.fcOut = torch.nn.Linear(20, len(actions_enum))
 
     def forward(self, x):
         x = self.fcOut(relu(self.fcInp(x)))
         return x
 
-    def learn(self, training_set):
+    def learn(self, buffer, training_set):
         """
         Learn Q-function using monte-carlo learning
+        :param buffer: Buffer object
         :param training_set: <list> Indices of buffer.memory to train
         """
         global DEBUGGING
@@ -78,39 +79,43 @@ class ATC_Net(nn.Module):
         returns = returns[::-1]
 
         if DEBUGGING:
-        	DEBUGGING = False
-        	pdb.set_trace()
+            DEBUGGING = False
+            pdb.set_trace()
 
         # Update Q for each state-action pair in training_set
         for t in training_set:
             state = buffer.memory[t][0]
             action = buffer.memory[t][1]
             q_value = self.forward(state)[action]  # Our DQN's estimate of Q(s,a)
-            mc_target = tensor(returns[t])  # Target Q(s,a)
+            mc_target = torch.tensor(returns[t])  # Target Q(s,a)
             loss = smooth_l1_loss(q_value, mc_target)
             optimizer.zero_grad()
             loss.backward()
             optimizer.step()
 
         global EXPLORATION, EPISODE_COUNT
-        EPISODE_COUNT += 1
+        EPISODE_COUNT += 0.5
         EXPLORATION = max(EXPLORATION_DECAY*EXPLORATION, EXPLORATION_MIN)
-        print(f"{EPISODE_COUNT} : Exploration is {EXPLORATION}, return was {returns[0]}, with minimum separation {MIN_SEPARATION}.")
+        print(f"{EPISODE_COUNT} : {buffer.ID} received {returns[0]} return.")
 
 
 class Buffer:
-    TEACHING = True
-    REWARD_PENDING = False
-    memory = []  # [ [S, A, R+] , [S+, A+, R++] ... [_, _, FINAL_REWARD] ]
+
+    def __init__(self, _ID: str):
+        self.ID = _ID
+        self.TEACHING = True
+        self.REWARD_PENDING = False
+        self.MIN_SEPARATION = 50.0
+        self.memory = []  # [ [S, A, R+] , [S+, A+, R++] ... [_, _, FINAL_REWARD] ]
 
     def teach(self, n_net: ATC_Net):
         """
         Trains the neural net on a fraction of the episode
         """
-        buffer_size = len(buffer.memory)
+        buffer_size = len(self.memory)
         n_samples = max(1, int(TRAINING_RATIO*buffer_size))
         training_set = self.get_training_set(n_samples)
-        n_net.learn(training_set)
+        n_net.learn(self, training_set)
 
     def get_training_set(self, n_samples):
         """
@@ -121,10 +126,13 @@ class Buffer:
         return training_set
 
     def empty(self):
-        self.REWARD_PENDING = False
         self.memory = []
+        self.MIN_SEPARATION = 50.0
 
-    def pause(self, option):
+    def pause(self, option: bool):
+        """
+        Allows pausing and resuming of Q-Learning
+        """
         self.empty()
         self.TEACHING = (not option)
 
@@ -132,8 +140,6 @@ class Buffer:
         """
         Add {state, action} pair to buffer memory
         """
-        if self.REWARD_PENDING:
-            raise RuntimeError
         self.memory.append([state, action])
         self.REWARD_PENDING = True
 
@@ -144,10 +150,32 @@ class Buffer:
         self.memory[-1] = self.memory[-1][:2] + [reward]
         self.REWARD_PENDING = False
 
+    def get_reward_for_distance(self):
+        """
+        :return: <float> Negative reward if minimum separation condition was violated during episode
+        """
+        if self.MIN_SEPARATION < MIN_SEPARATION_ALLOWED:
+            return -1*SEPARATION_COST
+        else:
+            return 0.0
+
+    def get_reward_for_action(self):
+        """
+        :return: <float> Negative reward if heading-change (else 0)
+        """
+        last_action = actions_enum[self.memory[-1][1]]
+        return -1 * ACTION_COST if last_action else 0.0
+
 
 # Initialization of static variables
 atc_net = ATC_Net()
-buffer = Buffer()
+if SAVED_STATE:
+    atc_net.load_state_dict(torch.load(SAVED_STATE))
+
+buffers = []
+for ID in AIRCRAFTS:
+    buffers.append(Buffer(ID))
+
 optimizer = optim.Adam(atc_net.parameters(), lr=0.001, betas=(0.9, 0.999), eps=1e-08, weight_decay=0, amsgrad=False)
 
 
@@ -188,63 +216,62 @@ def preupdate():
     if not COUNTER % RESOLVE_PERIOD:
         COUNTER = 0
 
-        # Check if aircrafts haven't been created yet
-        if not traf.ntraf:
+        # Check if aircrafts have been created yet
+        if traf.ntraf > 1:
+            resolve()
+
+        # Else, wait for BlueSky to process the aircraft creation
+        else:
             return
 
-        # Check if SELF is still in simulation area
-        _, self_dist = _qdrdist(traf.lat[0], traf.lon[0], 0.0, 0.0)
-        if self_dist < RADIUS_NM + 0.5:
-            try:
-                # Take CR action
-                resolve()
-            except RuntimeError:
-                # Discard episode and continue
-                reset_all()
+        # Check if aircrafts are still in simulation area
+        for ac in range(2):
+            (lat, lon) = (traf.lat[ac], traf.lon[ac])
+            _, distance_from_center = _qdrdist(lat, lon, 0.0, 0.0)
+            if distance_from_center > RADIUS_NM + 0.1:
+                for buffer in buffers:
+                    buffer.assign_reward(buffer.get_reward_for_action() + buffer.get_reward_for_distance())
+                    buffer.teach(atc_net)
 
-        # If SELF has left the area, conclude episode and update neural net
-        elif buffer.REWARD_PENDING:
-            buffer.assign_reward(get_reward_for_action() + get_reward_for_distance())
-            buffer.teach(atc_net)
-            reset_all()
-            # TODO : Use _qdrdist(0.0, 0.0, LAT[0], LON[0])[0] in input vector to correct the trajectory
+                reset_all()
+                return
+                # TODO : Use _qdrdist(0.0, 0.0, LAT[0], LON[0])[0] in input vector to correct the trajectory
 
 
 def reset_all():
     """
     Resets values after one batch of experience has been trained
     """
-    global MIN_SEPARATION
-    MIN_SEPARATION = float(2*RADIUS_NM)
-    buffer.empty()
+    for buffer in buffers:
+        buffer.empty()
+
     reset_aircrafts()
 
 
 def update():
     # Find the minimum separation maintained by the aircrafts in this episode
-    global MIN_SEPARATION
-
     if traf.ntraf > 1:
-        _, dist = _qdrdist(traf.lat[0], traf.lon[0], traf.lat[1], traf.lon[1])
-        MIN_SEPARATION = np.min([MIN_SEPARATION, dist])
+        for buffer in buffers:
+            _, dist = _qdrdist(traf.lat[0], traf.lon[0], traf.lat[1], traf.lon[1])
+            buffer.MIN_SEPARATION = np.min([buffer.MIN_SEPARATION, dist])
 
 
 def resolve():
     # Assign reward for previous state-action
-    if buffer.REWARD_PENDING:
-        buffer.assign_reward(get_reward_for_action())
+    for buffer in buffers:
+        buffer.assign_reward(buffer.get_reward_for_action()) if buffer.REWARD_PENDING else None
 
-    # Choose action for current time-step
-    state = get_state()
-    q_values = atc_net.forward(state)
-    action = get_action(q_values)
+        # Choose action for current time-step
+        state = get_state(buffer.ID)
+        q_values = atc_net.forward(state)
+        action = get_action(q_values)
 
-    # Store S, A in buffer (R will be observed later)
-    buffer.add_state_action(state, action)
+        # Store S, A in buffer (R will be observed later)
+        buffer.add_state_action(state, action)
 
-    # Execute action
-    new_heading = traf.hdg[traf.id2idx('SELF')] + float(actions_enum[action])
-    stack.stack(f"HDG SELF {new_heading}")
+        # Execute action
+        new_heading = traf.hdg[traf.id2idx(buffer.ID)] + float(actions_enum[action])
+        stack.stack(f"HDG {buffer.ID} {new_heading}")
 
 
 def make_angle_convex(angle):
@@ -258,20 +285,21 @@ def make_angle_convex(angle):
     return angle
 
 
-def get_state():
+def get_state(ac_id: str):
     """
     Get current state of simulation
+    :param ac_id: Aircraft to be controlled
     :return: torch.Tensor (Input for the neural network, containing enough information to render the problem Markov)
     """
-    self = traf.id2idx('SELF')
-    enemy = traf.id2idx('ENEMY')
+    self = traf.id2idx(ac_id)
+    enemy = (self + 1) % 2
     self_hdg = traf.hdg[self]
     enemy_hdg = traf.hdg[enemy]
     rel_hdg = make_angle_convex(enemy_hdg - self_hdg)
 
     qdr, dist = _qdrdist(traf.lat[self], traf.lon[self], traf.lat[enemy], traf.lon[enemy])
     qdr = make_angle_convex(qdr)
-    return tensor([make_angle_convex(qdr + self_hdg), dist, rel_hdg])
+    return torch.tensor([make_angle_convex(qdr + self_hdg), dist, rel_hdg])
 
 
 def get_action(q_values):
@@ -287,29 +315,11 @@ def get_action(q_values):
         return q_values.max(0)[1]
 
 
-def get_reward_for_distance():
-    """
-    :return: <float> Negative reward if minimum separation condition was violated during episode
-    """
-    if MIN_SEPARATION < MIN_SEPARATION_ALLOWED:
-        return -1*SEPARATION_COST
-    else:
-        return 0.0
-
-
-def get_reward_for_action():
-    """
-    :return: <float> Negative reward if heading-change (else 0)
-    """
-    last_action = actions_enum[buffer.memory[-1][1]]
-    return -1 * ACTION_COST if last_action else 0.0
-
-
 def _qdrdist(lat1, lon1, lat2, lon2):
     """
     Prevents BlueSky's qdrdist function from returning singular value
     """
-    return qdrdist(lat1, lon1, lat2 + 0.0001, lon2)
+    return qdrdist(lat1, lon1, lat2 + 0.000001, lon2)
 
 
 def show_net():
@@ -331,7 +341,7 @@ def show_net():
         Z_Right.append([])
         Z_Contour.append([])
         for _y in y:
-            nn_input = tensor([_x, 7.0, _y])
+            nn_input = torch.tensor([_x, 7.0, _y])
             nn_output = atc_net.forward(nn_input)
 
             Z_Left[-1].append(float(nn_output[0]))
@@ -370,8 +380,7 @@ def set_view(input_text):
     if int(input_text):
         VIEW_SIMULATIONS = True
         EXPLORATION = 0.0
-        buffer.pause(True)
     else:
         VIEW_SIMULATIONS = False
         EXPLORATION = EXPLORATION_START  # Note that exploration gets reset here
-        buffer.pause(False)
+        [buffer.pause(False) for buffer in buffers]
