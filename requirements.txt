@@ -1,4 +1,3 @@
-# For BlueSky
 scipy
 pyqt5
 pyqtwebengine
@@ -9,3 +8,6 @@ pygame
 zmq
 msgpack
 pandas
+
+torch
+mayavi
