@@ -7,7 +7,7 @@ from bluesky import traf, stack
 from bluesky.tools.geo import qdrdist
 from plugins.Sim_2AC import reset_aircrafts, RADIUS_NM
 
-from torch import tensor, Tensor, nn
+from torch import tensor, Tensor, nn, load
 from torch.nn.functional import smooth_l1_loss, relu
 import torch.optim as optim
 
@@ -32,8 +32,8 @@ SEPARATION_COST = 1000.0  # Penalty assigned the terminal state, based on minimu
 LEARNING_RATE = 0.01
 TRAINING_RATIO = 0.1  # Fraction of the episode to learn from
 
-EXPLORATION_START = 1.0
-EXPLORATION_MIN = 0.1
+EXPLORATION_START = 0.0
+EXPLORATION_MIN = 0.0
 EXPLORATION_DECAY = 0.9995
 
 # ----- Debugging and Simulation Parameters ----- #
@@ -147,6 +147,7 @@ class Buffer:
 
 # Initialization of static variables
 atc_net = ATC_Net()
+atc_net.load_state_dict(load("saved_data/atc-policy-1"))
 buffer = Buffer()
 optimizer = optim.Adam(atc_net.parameters(), lr=0.001, betas=(0.9, 0.999), eps=1e-08, weight_decay=0, amsgrad=False)
 
