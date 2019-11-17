@@ -1,6 +1,10 @@
 """
 Plugin for training a DQN for conflict-resolution, using monte-carlo learning
 Author : Shiraz Khan
+
+Saved ATC Policies ~
+atc-policy-1 : 90% Learnt policy for single-aircraft control (using costs 10.0 and 1000.0)
+atc-policy-2 : 40% Learnt policy for two-aircraft control
 """
 
 from bluesky import traf, stack
@@ -17,11 +21,10 @@ dHeading = 5  # Max heading allowed in one time-step
 actions_enum = [-dHeading, 0,  dHeading]  # Once of these actions given as a heading-change input
 RESOLVE_PERIOD = 300  # Every ___ steps of simulation, take conflict-resolution action
 MIN_SEPARATION_ALLOWED = 4.0  # Negative reward is incurred if aircrafts come closer than this
+AIRCRAFTS["ONE"].ATC = False  # Aircraft ONE is not being controlled by ATC
 
 # ----- Initialization ----- #
-# SAVED_STATE = None  # Start learning from scratch
-# SAVED_STATE = "saved_data/atc-policy-1"  # Start from 90% learnt policy for single-aircraft control
-SAVED_STATE = "saved_data/atc-policy-2"  # Start from 50% learnt policy for two-aircraft control
+SAVED_STATE = "saved_data/atc-policy-1"
 COUNTER = 0
 
 atc_net = ATC_Net(actions_enum)
@@ -29,8 +32,9 @@ if SAVED_STATE:
     atc_net.load_state_dict(torch.load(SAVED_STATE))
 
 buffers = []
-for ID in AIRCRAFTS:
-    buffers.append(Buffer(ID, actions_enum, MIN_SEPARATION_ALLOWED))
+for ID, aircraft in AIRCRAFTS.items():
+    if aircraft.ATC:
+        buffers.append(Buffer(ID, actions_enum, MIN_SEPARATION_ALLOWED))
 
 exploration = Exploration()
 
@@ -136,7 +140,7 @@ def resolve():
         # Choose action for current time-step
         state = get_state(buffer.ID)
         q_values = atc_net.forward(state)
-        action = get_action(q_values, epsilon=buffer.exploration.epsilon)
+        action = get_action(q_values, epsilon=exploration.eps)
 
         # Store S, A in buffer (R will be observed later)
         buffer.add_state_action(state, action)

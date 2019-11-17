@@ -14,16 +14,16 @@ from mpl_toolkits import mplot3d
 import matplotlib.pyplot as plt
 
 # ----- Reinforcement Learning Specifications ----- #
-ACTION_COST = 20.0  # <-1*ACTION_COST> reward for changing heading
-SEPARATION_COST = 2000.0  # Penalty assigned the terminal state, based on minimum separation during episode
+ACTION_COST = 10.0  # <-1*ACTION_COST> reward for changing heading
+SEPARATION_COST = 1000.0  # Penalty assigned the terminal state, based on minimum separation during episode
 DESTINATION_REWARD = 2000.0  # Incentive to correct the orientation after conflict-resolution
 
 LEARNING_RATE = 0.005
 TRAINING_RATIO = 0.2  # Fraction of the episode to learn from
 
 # Training based on a decaying epsilon greedy policy
-EPSILON_START = 0.3
-EPSILON_MIN = 0.1
+EPSILON_START = 0.0
+EPSILON_MIN = 0.0
 EPSILON_DECAY = 0.99999
 
 
@@ -135,7 +135,6 @@ class Buffer:
 
     def __init__(self, _ID: str, actions_enum, min_separation_allowed):
         self.ID = _ID
-        self.TEACHING = True
         self.REWARD_PENDING = False
 
         self.MIN_SEPARATION_ALLOWED = min_separation_allowed
@@ -164,13 +163,6 @@ class Buffer:
     def empty(self):
         self.memory = []
         self.MIN_SEPARATION = 50.0
-
-    def pause(self, option: bool):
-        """
-        Allows pausing and resuming of Q-Learning
-        """
-        self.empty()
-        self.TEACHING = (not option)
 
     def add_state_action(self, state, action):
         """

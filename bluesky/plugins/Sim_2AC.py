@@ -19,7 +19,7 @@ class Aircraft:
     def __init__(self, _ID):
         self.ID = _ID  # ID used for this a/c in BlueSky; redundant
         self.destination = None  # Most desirable terminal state for this aircraft
-        self.RESOLUTION = False  # Whether ATC conflict-resolution is being applied to this aircraft
+        self.ATC = True  # Whether ATC conflict-resolution is being applied to this aircraft
 
 
 AIRCRAFT_IDs = ["ONE", "TWO"]
