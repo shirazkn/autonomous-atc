@@ -13,7 +13,17 @@ RADIUS = 0.4
 # Radius (in nautical miles)
 _, RADIUS_NM = qdrdist(-RADIUS, 0.0, 0.0, 0.0)
 
-AIRCRAFTS = ["ONE", "TWO"]
+
+# Aircrafts in the simulation
+class Aircraft:
+    def __init__(self, _ID):
+        self.ID = _ID  # ID used for this a/c in BlueSky; redundant
+        self.destination = None  # Most desirable terminal state for this aircraft
+        self.RESOLUTION = False  # Whether ATC conflict-resolution is being applied to this aircraft
+
+
+AIRCRAFT_IDs = ["ONE", "TWO"]
+AIRCRAFTS = {_id: Aircraft(_id) for _id in AIRCRAFT_IDs}
 
 
 def init_plugin():
@@ -51,6 +61,7 @@ def create_ac(ID):
     pos_lon = -1 * RADIUS * sin(hdg_r)
     pos_lat = -1 * RADIUS * cos(hdg_r)
     stack.stack(f"CRE {ID} B744 {pos_lat} {pos_lon} {hdg} FL200 400")
+    AIRCRAFTS[ID].destination = [-1*pos_lat, -1*pos_lon]
 
 
 def reset_aircrafts():
