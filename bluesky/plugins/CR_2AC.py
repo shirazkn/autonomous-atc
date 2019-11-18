@@ -32,6 +32,7 @@ Use TD learning with experience replay & frozen network
 For each state-action, store target (using frozen network)
 Add a countdown for frozen network (to trigger synchronization)
 Add a size for the buffer & store episode length instead
+Make COUNTER>Resolve asynchronous
 """
 
 # ----- Initialization ----- #
@@ -44,9 +45,7 @@ if SAVED_STATE:
     atc_net.load_state_dict(torch.load(SAVED_STATE))
 
 exploration = Exploration()
-buffers = []
-for ID in AIRCRAFT_IDs:
-    buffers.append(Buffer(ID, actions_enum))
+buffers = {ID: Buffer(ID, actions_enum) for ID in AIRCRAFT_IDs}
 
 
 # ----- BlueSky plugin functions ----- #
@@ -89,39 +88,7 @@ def preupdate():
     Called once before simulation is updated
     at every time-step
     """
-    global COUNTER
-    COUNTER += 1
-
-    if traf.ntraf > 1:
-        for buffer in buffers:
-            # Get distance between aircrafts
-            dist_ac = qdrdist(traf.lat[0], traf.lon[0], traf.lat[1], traf.lon[1])[1]
-            buffer.set_separation(dist_ac)
-
-    # Rate of conflict-resolution is lesser than rate of simulation
-    if not COUNTER % RESOLVE_PERIOD:
-        COUNTER = 0
-
-        # Check if aircrafts have been created yet
-        if traf.ntraf > 1:
-            resolve()
-
-        # Else, wait for BlueSky to process the aircraft creation
-        else:
-            return
-
-        # Check if aircrafts are still in simulation area
-        for ac in range(2):
-            (lat, lon) = (traf.lat[ac], traf.lon[ac])
-            _, distance_from_center = _qdrdist(lat, lon, 0.0, 0.0)
-            if distance_from_center > RADIUS_NM + 0.1:
-                for buffer in buffers:
-                    buffer.assign_reward(None)
-                    del buffer.memory[-1]  # Reward for last transition was not observed
-                    buffer.teach(atc_net)
-
-                reset_all()
-                return
+    return
 
 
 def reset_all():
@@ -130,7 +97,7 @@ def reset_all():
     """
     global aircrafts
     aircrafts = reset_aircrafts()
-    for buffer in buffers:
+    for buffer in buffers.values():
         buffer.empty()
 
     exploration.decay()
@@ -141,19 +108,47 @@ def update():
     Called once along with BlueSky simulation update
     at every time-step
     """
-    return
+    global COUNTER
+    COUNTER += 1
+
+    for buffer in buffers.values():
+        # Get distance between aircrafts
+        dist_ac = qdrdist(traf.lat[0], traf.lon[0], traf.lat[1], traf.lon[1])[1]
+        buffer.set_separation(dist_ac)
+
+    # Rate of conflict-resolution is lesser than rate of simulation
+    if not COUNTER % RESOLVE_PERIOD:
+        COUNTER = 0
+        resolve()
+
+        for ac in aircrafts.values():
+            idx = traf.id2idx(ac.ID)
+            (lat, lon) = (traf.lat[idx], traf.lon[idx])
+
+            # Check if aircraft is still in simulation area
+            _, distance_from_center = _qdrdist(lat, lon, 0.0, 0.0)
+            if distance_from_center > RADIUS_NM + 0.1:
+
+                # Teach neural net
+                buffers[ac.ID].terminate_episode()
+
+                # Reset everything
+                buffers[ac.ID].check(atc_net)
+                ac.soft_reset()
+                exploration.decay()
 
 
 def resolve():
     """
     Take conflict resolution action for every aircraft
     """
-    for buffer in buffers:
+    for buffer in buffers.values():
         # Assign reward for previous state-action
         current_heading = traf.hdg[traf.id2idx(buffer.ID)]
-        if buffer.REWARD_PENDING:
-            buffer.assign_reward(buffer.get_reward_for_distance(critical_distance)
-                                 + buffer.get_reward_for_deviation(current_heading))
+        if buffer.episode_length:
+            reward = buffer.get_reward_for_distance(critical_distance) \
+                     + buffer.get_reward_for_deviation(current_heading)
+            buffer.update_targets(reward, atc_net)
 
         # Choose action for current time-step
         state = get_state(buffer.ID)

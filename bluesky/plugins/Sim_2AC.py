@@ -23,6 +23,18 @@ class Aircraft:
         self.dest = destination  # Most desirable terminal state for this aircraft (Destination)
         self.ATC = ATC  # Whether ATC conflict-resolution is being applied to this aircraft
 
+    def soft_reset(self):
+        """
+        Moves aircraft to random point on circumference ( New episode )
+        """
+        hdg = random.uniform(0, 360.0)
+        hdg_r = deg2rad(hdg)
+        pos_lat = -1 * RADIUS * cos(hdg_r)
+        pos_lon = -1 * RADIUS * sin(hdg_r)
+
+        self.dest = [-1.2 * pos_lat, -1.2 * pos_lon]
+        stack.stack(f"MOVE {self.ID} {pos_lat} {pos_lon} FL200 {hdg} 400")
+
 
 def init_plugin():
     reset()
@@ -42,7 +54,6 @@ def init_plugin():
 def reset():
     # Visualize simulation area
     stack.stack(f"CIRCLE SimCirc 0 0 {RADIUS_NM}")
-    # stack.stack("AREA SimCirc")  ~~ This is now being done explicitly in plugins.CR_2AC.preupdate()
 
 
 def preupdate():
@@ -51,19 +62,17 @@ def preupdate():
 
 def create_ac(ID):
     """
-    Create aircraft coming inwards from a random point on circumference
+    Create new aircraft
     """
-    hdg = random.uniform(0, 360.0)
-    hdg_r = deg2rad(hdg)
-    pos_lon = -1 * RADIUS * sin(hdg_r)
-    pos_lat = -1 * RADIUS * cos(hdg_r)
-    stack.stack(f"CRE {ID} B744 {pos_lat} {pos_lon} {hdg} FL200 400")
-    return Aircraft(ID, destination=[-1*pos_lat, -1*pos_lon])
+    stack.stack(f"CRE {ID} B744 {0.0} {0.0} {0.0} FL200 400")
+    aircraft = Aircraft(ID)
+    aircraft.soft_reset()
+    return aircraft
 
 
 def reset_aircrafts():
     """
-    Creates both aircrafts.
+    Deletes everything and creates new aircrafts.
     Note : CR_2AC relies on the order of creation
     """
     delete_aircrafts()
