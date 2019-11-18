@@ -14,7 +14,7 @@ from mpl_toolkits import mplot3d
 import matplotlib.pyplot as plt
 
 # ----- Reinforcement Learning Specifications ----- #
-SEPARATION_COST = 80.0  # Penalty assigned based on separation between aircrafts
+SEPARATION_COST = 100.0  # Penalty assigned based on separation between aircrafts
 DEVIATION_COST = 10.0  # Incentive to correct the orientation after conflict-resolution
 # Incentive to correct orientation must be sufficiently lower than that to maintain separation
 
@@ -22,7 +22,7 @@ LEARNING_RATE = 0.005
 TRAINING_RATIO = 0.2  # Fraction of the episode to learn from
 
 # Training based on a decaying epsilon greedy policy
-EPSILON_START = 0.0
+EPSILON_START = 0.3
 EPSILON_MIN = 0.0
 EPSILON_DECAY = 0.99999
 
@@ -45,8 +45,8 @@ class ATC_Net(torch.nn.Module):
         super(ATC_Net, self).__init__()
 
         # Network input & output layers
-        self.fcInp = torch.nn.Linear(3, 20)
-        self.fcOut = torch.nn.Linear(20, len(actions_enum))
+        self.fcInp = torch.nn.Linear(5, 25)
+        self.fcOut = torch.nn.Linear(25, len(actions_enum))
 
         self.optimizer = optim.Adam(self.parameters(), lr=LEARNING_RATE, betas=(0.9, 0.999), eps=1e-08,
                                     weight_decay=0, amsgrad=False)
@@ -99,14 +99,12 @@ class ATC_Net(torch.nn.Module):
 
 class Buffer:
 
-    def __init__(self, _ID: str, actions_enum, min_separation_allowed):
+    def __init__(self, _ID: str, actions_enum):
         self.ID = _ID
         self.REWARD_PENDING = False
 
-        self.MIN_SEPARATION_ALLOWED = min_separation_allowed
-        self.MIN_SEPARATION = 100.0  # Dummy starting value that's larger than simulation area
-
         self.memory = []  # [ [S, A, R+] , [S+, A+, R++] ... [_, _, FINAL_REWARD] ]
+        self.separation = 100.0  # Dummy starting value for separation between the aircrafts
         self.actions_enum = actions_enum
 
     def teach(self, n_net: ATC_Net):
@@ -128,7 +126,9 @@ class Buffer:
 
     def empty(self):
         self.memory = []
-        self.MIN_SEPARATION = 100.0
+
+    def set_separation(self, distance):
+        self.separation = np.min([self.separation, distance])
 
     def add_state_action(self, state, action):
         """
@@ -143,16 +143,16 @@ class Buffer:
         """
         self.memory[-1] = self.memory[-1][:2] + [reward]
         self.REWARD_PENDING = False
+        self.separation = 100.0
 
-    def get_reward_for_distance(self):
+    def get_reward_for_distance(self, critical_distance):
         """
         :return: <float> Negative reward based on separation between aircrafts
         """
-        distance = self.memory[-1][0][1]
-        if distance < self.MIN_SEPARATION_ALLOWED:
+        if self.separation < critical_distance:
             C1 = SEPARATION_COST * 0.5
             C2 = 1.0
-            correction_term = C1 / (distance - (self.MIN_SEPARATION_ALLOWED + C2)) ** 2
+            correction_term = C1 / (self.separation - (critical_distance + C2)) ** 2
             return -1 * SEPARATION_COST + correction_term
 
         else:

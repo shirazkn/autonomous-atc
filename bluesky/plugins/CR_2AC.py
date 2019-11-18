@@ -9,7 +9,7 @@ atc-policy-2 : 40% Learnt policy for two-aircraft control
 
 from bluesky import traf, stack
 from bluesky.tools.geo import qdrdist
-from plugins.Sim_2AC import reset_aircrafts, RADIUS_NM, AIRCRAFTS
+from plugins.Sim_2AC import reset_aircrafts, RADIUS_NM, AIRCRAFT_IDs
 from plugins.CR_2AC_classes import ATC_Net, Buffer, Exploration
 
 import pdb
@@ -17,32 +17,45 @@ import torch
 import numpy as np
 
 # ----- Problem Specifications ----- #
-dHeading = 5  # Max heading allowed in one time-step
+dHeading = 10  # Max heading allowed in one time-step
 actions_enum = [-dHeading, 0,  dHeading]  # Once of these actions given as a heading-change input
+critical_distance = 4.0  # Negative reward is incurred if aircrafts come closer than this
 RESOLVE_PERIOD = 300  # Every ___ steps of simulation, take conflict-resolution action
-MIN_SEPARATION_ALLOWED = 4.0  # Negative reward is incurred if aircrafts come closer than this
+
+"""
+Notes : 
+Setting reward period to 600 and simulation radius to 24Nm gives episode length of ~10
+
+To do :
+Discounted rewards ( to prioritize conflict resolution & deviation )
+Use TD learning with experience replay & frozen network
+For each state-action, store target (using frozen network)
+Add a countdown for frozen network (to trigger synchronization)
+Add a size for the buffer & store episode length instead
+"""
 
 # ----- Initialization ----- #
 SAVED_STATE = None
+aircrafts = None
 COUNTER = 0
 
 atc_net = ATC_Net(actions_enum)
 if SAVED_STATE:
     atc_net.load_state_dict(torch.load(SAVED_STATE))
 
-buffers = []
-for ID, aircraft in AIRCRAFTS.items():
-    if aircraft.ATC:
-        buffers.append(Buffer(ID, actions_enum, MIN_SEPARATION_ALLOWED))
-
 exploration = Exploration()
+buffers = []
+for ID in AIRCRAFT_IDs:
+    buffers.append(Buffer(ID, actions_enum))
 
 
+# ----- BlueSky plugin functions ----- #
 def init_plugin():
     """
     Initialization of BlueSky plugin
     Called once during plugin import
     """
+    reset_all()
 
     # Configuration parameters
     config = {
@@ -79,6 +92,12 @@ def preupdate():
     global COUNTER
     COUNTER += 1
 
+    if traf.ntraf > 1:
+        for buffer in buffers:
+            # Get distance between aircrafts
+            dist_ac = qdrdist(traf.lat[0], traf.lon[0], traf.lat[1], traf.lon[1])[1]
+            buffer.set_separation(dist_ac)
+
     # Rate of conflict-resolution is lesser than rate of simulation
     if not COUNTER % RESOLVE_PERIOD:
         COUNTER = 0
@@ -97,6 +116,7 @@ def preupdate():
             _, distance_from_center = _qdrdist(lat, lon, 0.0, 0.0)
             if distance_from_center > RADIUS_NM + 0.1:
                 for buffer in buffers:
+                    buffer.assign_reward(None)
                     del buffer.memory[-1]  # Reward for last transition was not observed
                     buffer.teach(atc_net)
 
@@ -108,11 +128,12 @@ def reset_all():
     """
     Resets values after one batch of experience has been trained
     """
+    global aircrafts
+    aircrafts = reset_aircrafts()
     for buffer in buffers:
         buffer.empty()
 
     exploration.decay()
-    reset_aircrafts()
 
 
 def update():
@@ -129,9 +150,10 @@ def resolve():
     """
     for buffer in buffers:
         # Assign reward for previous state-action
+        current_heading = traf.hdg[traf.id2idx(buffer.ID)]
         if buffer.REWARD_PENDING:
-            current_heading = traf.hdg[buffer.ID]
-            buffer.assign_reward(buffer.get_reward_for_distance() + buffer.get_reward_for_deviation(current_heading))
+            buffer.assign_reward(buffer.get_reward_for_distance(critical_distance)
+                                 + buffer.get_reward_for_deviation(current_heading))
 
         # Choose action for current time-step
         state = get_state(buffer.ID)
@@ -142,7 +164,7 @@ def resolve():
         buffer.add_state_action(state, action)
 
         # Execute action
-        new_heading = traf.hdg[traf.id2idx(buffer.ID)] + float(actions_enum[action])
+        new_heading = current_heading + float(actions_enum[action])
         stack.stack(f"HDG {buffer.ID} {new_heading}")
 
 
@@ -164,7 +186,7 @@ def get_state(ac_id: str):
     qdr_ac, dist_ac = _qdrdist(traf.lat[self], traf.lon[self], traf.lat[enemy], traf.lon[enemy])
 
     # Relative position of destination
-    dest_lat, dest_lon = AIRCRAFTS[ac_id].DESTINATION
+    dest_lat, dest_lon = aircrafts[ac_id].dest
     qdr_dn, dist_dn = _qdrdist(traf.lat[self], traf.lon[self], dest_lat, dest_lon)
 
     state = [

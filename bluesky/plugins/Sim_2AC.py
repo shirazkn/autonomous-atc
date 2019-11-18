@@ -13,17 +13,15 @@ RADIUS = 0.4
 # Radius (in nautical miles)
 _, RADIUS_NM = qdrdist(-RADIUS, 0.0, 0.0, 0.0)
 
-
 # Aircrafts in the simulation
-class Aircraft:
-    def __init__(self, _ID):
-        self.ID = _ID  # ID used for this a/c in BlueSky; redundant
-        self.destination = None  # Most desirable terminal state for this aircraft
-        self.ATC = True  # Whether ATC conflict-resolution is being applied to this aircraft
-
-
 AIRCRAFT_IDs = ["ONE", "TWO"]
-AIRCRAFTS = {_id: Aircraft(_id) for _id in AIRCRAFT_IDs}
+
+
+class Aircraft:
+    def __init__(self, _ID, destination=None, ATC=True):
+        self.ID = _ID  # ID used for this a/c in BlueSky; redundant
+        self.dest = destination  # Most desirable terminal state for this aircraft (Destination)
+        self.ATC = ATC  # Whether ATC conflict-resolution is being applied to this aircraft
 
 
 def init_plugin():
@@ -45,7 +43,6 @@ def reset():
     # Visualize simulation area
     stack.stack(f"CIRCLE SimCirc 0 0 {RADIUS_NM}")
     # stack.stack("AREA SimCirc")  ~~ This is now being done explicitly in plugins.CR_2AC.preupdate()
-    reset_aircrafts()
 
 
 def preupdate():
@@ -61,7 +58,7 @@ def create_ac(ID):
     pos_lon = -1 * RADIUS * sin(hdg_r)
     pos_lat = -1 * RADIUS * cos(hdg_r)
     stack.stack(f"CRE {ID} B744 {pos_lat} {pos_lon} {hdg} FL200 400")
-    AIRCRAFTS[ID].destination = [-1*pos_lat, -1*pos_lon]
+    return Aircraft(ID, destination=[-1*pos_lat, -1*pos_lon])
 
 
 def reset_aircrafts():
@@ -70,10 +67,9 @@ def reset_aircrafts():
     Note : CR_2AC relies on the order of creation
     """
     delete_aircrafts()
-    for ID in AIRCRAFTS:
-        create_ac(ID)
+    return {ID: create_ac(ID) for ID in AIRCRAFT_IDs}
 
 
 def delete_aircrafts():
-    for ID in AIRCRAFTS:
+    for ID in AIRCRAFT_IDs:
         stack.stack(f"DEL {ID}")
