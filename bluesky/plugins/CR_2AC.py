@@ -21,10 +21,9 @@ dHeading = 5  # Max heading allowed in one time-step
 actions_enum = [-dHeading, 0,  dHeading]  # Once of these actions given as a heading-change input
 RESOLVE_PERIOD = 300  # Every ___ steps of simulation, take conflict-resolution action
 MIN_SEPARATION_ALLOWED = 4.0  # Negative reward is incurred if aircrafts come closer than this
-AIRCRAFTS["ONE"].ATC = False  # Aircraft ONE is not being controlled by ATC
 
 # ----- Initialization ----- #
-SAVED_STATE = "saved_data/atc-policy-1"
+SAVED_STATE = None
 COUNTER = 0
 
 atc_net = ATC_Net(actions_enum)
@@ -98,12 +97,11 @@ def preupdate():
             _, distance_from_center = _qdrdist(lat, lon, 0.0, 0.0)
             if distance_from_center > RADIUS_NM + 0.1:
                 for buffer in buffers:
-                    buffer.assign_reward(buffer.get_reward_for_action() + buffer.get_reward_for_distance())
+                    del buffer.memory[-1]  # Reward for last transition was not observed
                     buffer.teach(atc_net)
 
                 reset_all()
                 return
-                # TODO : Use _qdrdist(0.0, 0.0, LAT[0], LON[0])[0] in input vector to correct the trajectory
 
 
 def reset_all():
@@ -122,20 +120,18 @@ def update():
     Called once along with BlueSky simulation update
     at every time-step
     """
-    # Find the minimum separation maintained by the aircrafts in this episode
-    if traf.ntraf > 1:
-        for buffer in buffers:
-            _, dist = _qdrdist(traf.lat[0], traf.lon[0], traf.lat[1], traf.lon[1])
-            buffer.MIN_SEPARATION = np.min([buffer.MIN_SEPARATION, dist])
+    return
 
 
 def resolve():
     """
     Take conflict resolution action for every aircraft
     """
-    # Assign reward for previous state-action
     for buffer in buffers:
-        buffer.assign_reward(buffer.get_reward_for_action()) if buffer.REWARD_PENDING else None
+        # Assign reward for previous state-action
+        if buffer.REWARD_PENDING:
+            current_heading = traf.hdg[buffer.ID]
+            buffer.assign_reward(buffer.get_reward_for_distance() + buffer.get_reward_for_deviation(current_heading))
 
         # Choose action for current time-step
         state = get_state(buffer.ID)
@@ -158,13 +154,27 @@ def get_state(ac_id: str):
     """
     self = traf.id2idx(ac_id)
     enemy = (self + 1) % 2
+
+    # Relative heading of other aircraft
     self_hdg = traf.hdg[self]
     enemy_hdg = traf.hdg[enemy]
-    rel_hdg = make_angle_convex(enemy_hdg - self_hdg)
+    rel_hdg = enemy_hdg - self_hdg
 
-    qdr, dist = _qdrdist(traf.lat[self], traf.lon[self], traf.lat[enemy], traf.lon[enemy])
-    qdr = make_angle_convex(qdr)
-    return torch.tensor([make_angle_convex(qdr + self_hdg), dist, rel_hdg])
+    # Relative position of other aircraft
+    qdr_ac, dist_ac = _qdrdist(traf.lat[self], traf.lon[self], traf.lat[enemy], traf.lon[enemy])
+
+    # Relative position of destination
+    dest_lat, dest_lon = AIRCRAFTS[ac_id].DESTINATION
+    qdr_dn, dist_dn = _qdrdist(traf.lat[self], traf.lon[self], dest_lat, dest_lon)
+
+    state = [
+        make_angle_convex(qdr_ac + self_hdg),
+        dist_ac,
+        make_angle_convex(rel_hdg),
+        make_angle_convex(qdr_dn + self_hdg),
+        dist_dn
+    ]
+    return torch.tensor(state)
 
 
 def get_action(q_values, epsilon):

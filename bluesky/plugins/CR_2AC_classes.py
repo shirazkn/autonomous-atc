@@ -14,9 +14,9 @@ from mpl_toolkits import mplot3d
 import matplotlib.pyplot as plt
 
 # ----- Reinforcement Learning Specifications ----- #
-ACTION_COST = 10.0  # <-1*ACTION_COST> reward for changing heading
-SEPARATION_COST = 1000.0  # Penalty assigned the terminal state, based on minimum separation during episode
-DESTINATION_REWARD = 2000.0  # Incentive to correct the orientation after conflict-resolution
+SEPARATION_COST = 80.0  # Penalty assigned based on separation between aircrafts
+DEVIATION_COST = 10.0  # Incentive to correct the orientation after conflict-resolution
+# Incentive to correct orientation must be sufficiently lower than that to maintain separation
 
 LEARNING_RATE = 0.005
 TRAINING_RATIO = 0.2  # Fraction of the episode to learn from
@@ -85,50 +85,16 @@ class ATC_Net(torch.nn.Module):
         print(f"{buffer.ID} received {returns[0]} return.")
 
     def plot(self):
-        mlab.clf()
-        x = np.linspace(-180, 180, 150)
-        y = np.linspace(-180, 180, 150)
-        X, Y = np.meshgrid(x, y)
-
-        Z_Left = []
-        Z_Right = []
-        Z_Contour = []
-
-        for _x in x:
-            Z_Left.append([])
-            Z_Right.append([])
-            Z_Contour.append([])
-            for _y in y:
-                nn_input = torch.tensor([_x, 10.0, _y])
-                nn_output = self.forward(nn_input)
-
-                Z_Left[-1].append(float(nn_output[0]))
-                Z_Right[-1].append(float(nn_output[2]))
-                Z_Contour[-1].append(nn_output.max(0)[1])
-
-        Z_Left = np.array(Z_Left)
-        Z_Right = np.array(Z_Right)
-        Z_Contour = np.array(Z_Contour)
-
-        mlab.surf(x, y, Z_Left, colormap="Greens")
-        mlab.surf(x, y, Z_Right, colormap="Reds")
-        mlab.xlabel('qdr + self_hdg')
-        mlab.ylabel('rel_hdg')
-        mlab.title("Values for LEFT (g) and RIGHT (r)")
-        mlab.show()
-
-        # plt.contourf(X, Y, Z_Contour, levels=5, colors=('g', 'b', 'r'))
-        # plt.show()
-
-    # TODO
-    # def show_policy():
-    #     # My hdg = 0.0
-    #     # my lat, lon = 0.0, 0.0
-    #
-    #     # Make mesh of points, x, y
-    #     # t_angle =
-    #
-    #     return
+        # TODO
+        # def show_policy():
+        #     # My hdg = 0.0
+        #     # my lat, lon = 0.0, 0.0
+        #
+        #     # Make mesh of points, x, y
+        #     # t_angle =
+        #
+        #     return
+        raise NotImplementedError
 
 
 class Buffer:
@@ -138,7 +104,7 @@ class Buffer:
         self.REWARD_PENDING = False
 
         self.MIN_SEPARATION_ALLOWED = min_separation_allowed
-        self.MIN_SEPARATION = 50.0  # Dummy starting value that's larger than simulation area
+        self.MIN_SEPARATION = 100.0  # Dummy starting value that's larger than simulation area
 
         self.memory = []  # [ [S, A, R+] , [S+, A+, R++] ... [_, _, FINAL_REWARD] ]
         self.actions_enum = actions_enum
@@ -162,7 +128,7 @@ class Buffer:
 
     def empty(self):
         self.memory = []
-        self.MIN_SEPARATION = 50.0
+        self.MIN_SEPARATION = 100.0
 
     def add_state_action(self, state, action):
         """
@@ -180,17 +146,24 @@ class Buffer:
 
     def get_reward_for_distance(self):
         """
-        :return: <float> Negative reward if minimum separation condition was violated during episode
+        :return: <float> Negative reward based on separation between aircrafts
         """
-        if self.MIN_SEPARATION < self.MIN_SEPARATION_ALLOWED:
-            return -1*SEPARATION_COST
+        distance = self.memory[-1][0][1]
+        if distance < self.MIN_SEPARATION_ALLOWED:
+            C1 = SEPARATION_COST * 0.5
+            C2 = 1.0
+            correction_term = C1 / (distance - (self.MIN_SEPARATION_ALLOWED + C2)) ** 2
+            return -1 * SEPARATION_COST + correction_term
+
         else:
             return 0.0
 
-    def get_reward_for_action(self):
+    def get_reward_for_deviation(self, current_heading):
         """
-        :return: <float> Negative reward if heading-change (else 0)
+        :return: <float> Most positive when heading towards destination
         """
-        last_action = self.actions_enum[self.memory[-1][1]]
-        return -1 * ACTION_COST if last_action else 0.0
+        destination_qdr = self.memory[-1][0][3]
+        deviation_factor = np.cos(destination_qdr - current_heading) - 1.0
+
+        return 0.5*DEVIATION_COST*deviation_factor
 
