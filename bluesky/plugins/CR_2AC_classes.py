@@ -163,7 +163,7 @@ class Buffer:
         :return: <float> Most positive when heading towards destination
         """
         destination_qdr = self.memory[-1][0][3]
-        deviation_factor = np.cos(destination_qdr - current_heading) - 1.0
+        deviation_factor = np.cos(np.deg2rad(destination_qdr - current_heading)) - 1.0
 
         return 0.5*DEVIATION_COST*deviation_factor
 
