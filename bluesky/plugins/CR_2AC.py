@@ -14,13 +14,14 @@ from plugins.CR_2AC_classes import ATC_Net, Buffer, Exploration
 
 import pdb
 import torch
+
 import numpy as np
 
 # ----- Problem Specifications ----- #
 dHeading = 10  # Max heading allowed in one time-step
 actions_enum = [-dHeading, 0,  dHeading]  # Once of these actions given as a heading-change input
-critical_distance = 4.0  # Negative reward is incurred if aircrafts come closer than this
-RESOLVE_PERIOD = 300  # Every ___ steps of simulation, take conflict-resolution action
+critical_distance = 6.0  # Negative reward is incurred if aircrafts come closer than this
+RESOLVE_PERIOD = 250  # Every ___ steps of simulation, take conflict-resolution action
 
 """
 Notes : 
@@ -100,8 +101,6 @@ def reset_all():
     for buffer in buffers.values():
         buffer.empty()
 
-    exploration.decay()
-
 
 def update():
     """
@@ -129,10 +128,12 @@ def update():
             _, distance_from_center = _qdrdist(lat, lon, 0.0, 0.0)
             if distance_from_center > RADIUS_NM + 0.1:
 
-                # Teach neural net
+                # Reached terminal state
+                terminal_reward = buffers[ac.ID].get_terminal_reward()
+                buffers[ac.ID].update_targets(terminal_reward, atc_net)
                 buffers[ac.ID].terminate_episode()
 
-                # Reset everything
+                # Reset everything (and maybe teach neural net)
                 buffers[ac.ID].check(atc_net)
                 ac.soft_reset()
                 exploration.decay()
@@ -146,8 +147,7 @@ def resolve():
         # Assign reward for previous state-action
         current_heading = traf.hdg[traf.id2idx(buffer.ID)]
         if buffer.episode_length:
-            reward = buffer.get_reward_for_distance(critical_distance) \
-                     + buffer.get_reward_for_deviation(current_heading)
+            reward = buffer.get_reward_for_distance(critical_distance)
             buffer.update_targets(reward, atc_net)
 
         # Choose action for current time-step
@@ -165,7 +165,7 @@ def resolve():
 
 def get_state(ac_id: str):
     """
-    Get current state of simulation
+    Get current state tuple of aircraft
     :param ac_id: Aircraft to be controlled
     :return: torch.Tensor (Input for the neural network, containing enough information to render the problem Markov)
     """
@@ -229,7 +229,7 @@ def _qdrdist(lat1, lon1, lat2, lon2):
 
 def show_net():
     """
-    Visualizes the current Q(s,a_1) and Q(s,a_2) values of neural net
+    Visualizes the current Q(s,a_1) and Q(s,a_3) values of neural net
     Use BlueSky command SHOW_NET
     """
     atc_net.plot()
