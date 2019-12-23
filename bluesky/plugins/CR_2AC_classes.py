@@ -6,12 +6,14 @@ Class definitions for CR_2AC plugin
 import pdb
 import numpy as np
 from random import sample as random_sample
+from random import shuffle as random_shuffle
 from bluesky.tools.geo import qdrdist
+from plugins.Sim_2AC import RADIUS_NM, RADIUS
 
 import torch
 import torch.optim as optim
 from torch.utils.tensorboard import SummaryWriter
-from torch.nn.functional import smooth_l1_loss, relu
+from torch.nn.functional import smooth_l1_loss, leaky_relu
 
 import matplotlib.pyplot as plt
 # import torchvision.utils
@@ -20,34 +22,40 @@ import matplotlib.pyplot as plt
 
 # ----- Reinforcement Learning Specifications ----- #
 DISCOUNT = 0.9  # Discount factor / Gamma
-N_STEPS = 3  # Number of steps for n-step TD implementation
-SEPARATION_COST = 100.0  # Penalty assigned based on separation between aircrafts
-TERMINAL_REWARD = 100.0  # Incentive to correct the orientation after conflict-resolution
+N_STEPS = 2  # Number of steps for n-step TD implementation
+SEPARATION_COST = 10.0  # Penalty assigned based on separation between aircrafts
+TERMINAL_REWARD = 2.0  # Incentive to correct the orientation after conflict-resolution
 # Incentive to correct orientation must be sufficiently lower than that to maintain separation
 
-LEARNING_RATE = 0.005
-TRAINING_RATIO = 0.15  # Fraction of the buffer memory to learn from
-BUFFER_SIZE = 500
+LEARNING_RATE = 0.05
+HIDDEN_NEURONS = 20
+INITIALIZATION_POINTS = 500
+TRAINING_RATIO = 0.3  # Fraction of the buffer memory to learn from
+BUFFER_SIZE = 90
 
 # Training based on a decaying epsilon greedy policy
-EPSILON_START = 0.3
-EPSILON_MIN = 0.0
-EPSILON_DECAY = 0.99993
+EPSILON_START = 0.5
+EPSILON_MIN = 0.05
+EPSILON_DECAY = 0.9995
 
+torch.manual_seed(0)
 writer = SummaryWriter("saved_data/last_simulation")
 # Use tensorboard --logdir=runs from terminal, then navigate to https://localhost:6006/
 
 
 class Exploration:
     def __init__(self):
+        # Probability of taking a random action instead of greedy one
         self.eps = EPSILON_START
 
     def decay(self):
         self.eps = max(EPSILON_DECAY * self.eps, EPSILON_MIN)
 
 
-# PyTorch Neural Net
 class ATC_Net(torch.nn.Module):
+    """
+    Neural network which acts as the air traffic controller
+    """
 
     def __init__(self, actions_enum):
         """
@@ -56,15 +64,18 @@ class ATC_Net(torch.nn.Module):
         super(ATC_Net, self).__init__()
 
         # Network input & output layers
-        self.fcInp = torch.nn.Linear(5, 25)
-        self.fcOut = torch.nn.Linear(25, len(actions_enum))
+        self.Inp = torch.nn.Linear(5, HIDDEN_NEURONS)
+        self.Out = torch.nn.Linear(HIDDEN_NEURONS, len(actions_enum))
 
         self.optimizer = optim.Adam(self.parameters(), lr=LEARNING_RATE, betas=(0.9, 0.999), eps=1e-08,
                                     weight_decay=0, amsgrad=False)
+
+        self.exploration = Exploration()
+        self.lr_decay = torch.optim.lr_scheduler.StepLR(self.optimizer, step_size=1, gamma=EPSILON_DECAY)
         writer.add_graph(self, torch.tensor([0.0, 0.0, 0.0, 0.0, 0.0]))
 
     def forward(self, x):
-        x = self.fcOut(relu(self.fcInp(x)))
+        x = self.Out(leaky_relu(self.Inp(x)))
         return x
 
     def learn(self, buffer, training_set):
@@ -74,55 +85,122 @@ class ATC_Net(torch.nn.Module):
         :param training_set: <list> Indices of buffer.memory to train
         """
         # Update Q for each state-action pair in training_set
+        self.optimizer.zero_grad()
 
+        # Get Q-values and targets
         for t in training_set:
             state = buffer.memory[t][0]
             action = buffer.memory[t][1]
             q_value = self.forward(state)[action]  # Our DQN's estimate of Q(s,a)
-            target = buffer.memory[t][2]  # Target Q(s,a)
+            target = torch.tensor(buffer.memory[t][2]).detach_()  # Target Q(s,a)
+
+            # Update Network parameters
             loss = smooth_l1_loss(q_value, target)
+            loss.backward()
+
+        for p in self.parameters():
+            print(p.grad)
+
+        self.optimizer.step()
+        self.exploration.decay()
+        self.lr_decay.step()
+
+        print(f"Learning rate is {self.lr_decay.get_lr()} and exploration is {self.exploration.eps}.")
+        writer.add_scalar(f"Loss/Aircraft_{buffer.ID}", loss)
+
+    def initialize(self, action_values: dict, critical_distance=RADIUS_NM):
+        """
+        :param action_values: [Q(s,a1) , Q(s,a2) ... ]
+        :param critical_distance: Minimum separation to maintain between aircrafts
+        """
+        n_grid = int(INITIALIZATION_POINTS**0.5)
+
+        longitudes = np.linspace(-RADIUS, RADIUS, n_grid)
+        latitudes = np.linspace(-RADIUS, RADIUS, n_grid)
+        headings = np.linspace(-180, 180, 4)
+
+        inputs = []
+        outputs = []
+        for heading in headings:
+            for lon in longitudes:
+                for lat in latitudes:
+                    # Get input tuple
+                    qdr_ac, dist_ac = _qdrdist(0.0, 0.0, lat, lon)
+                    qdr_ac = make_angle_convex(qdr_ac)
+                    rel_hdg = make_angle_convex(qdr_ac + heading)
+                    state = [qdr_ac, dist_ac, rel_hdg, 0.0, 24.0]
+
+                    # Get output tuple
+                    if dist_ac < critical_distance:
+                        if lon > 0.0:
+                            output = [1.0, 0.5, 0.5]
+                        else:
+                            output = [0.5, 0.5, 1.0]
+
+                    else:
+                        output = [0.0, 0.5, 0.0]
+
+                    inputs.append(torch.tensor(normalize(state)))
+                    outputs.append(torch.tensor(output, requires_grad=False))
+
+        training_set = list(zip(inputs, outputs))
+        random_shuffle(training_set)
+
+        losses = []
+        for i in range(len(training_set)):
             self.optimizer.zero_grad()
+            output = self.forward(training_set[i][0])
+            loss = smooth_l1_loss(output, training_set[i][1])
             loss.backward()
             self.optimizer.step()
-            if np.random.uniform(0, 1) < 0.02:
-                print(f"UPDATED : {q_value} towards {target}. NEW VALUE : {self.forward(state)[action]}...")
-            writer.add_scalar(f"Loss/Aircraft_{buffer.ID}", loss)
+            losses.append(float(loss))
 
-        # print(f"{buffer.ID} completed {buffer.updates} updates.")
-        # print(f"EPISODE : {buffer.memory[-1 - buffer.episode_length:]}.")
+        plt.plot(losses)
+        plt.title("Losses during initialization")
+        plt.ylabel("Loss")
+        plt.xlabel("Data Points")
+        self.plot()
 
     def plot(self):
         """
         Plots the optimal action (for various positions of the other aircraft)
         """
-        fig = plt.figure(figsize=(6, 5))
+        fig = plt.figure(figsize=(6, 6))
         left, bottom, width, height = 0.1, 0.1, 0.8, 0.8
         ax = fig.add_axes([left, bottom, width, height])
-        x_list = np.linspace(-0.4, 0.4)
-        y_list = np.linspace(-0.4, 0.4)
-        X, Y = np.meshgrid(x_list, y_list)
-        Z = []
-        for x in x_list:
-            Z.append([])
-            for y in y_list:
-                qdr_ac, dist_ac = qdrdist(0.0, 0.0, y + 0.0001, x)
-                state = torch.tensor([qdr_ac, dist_ac, qdr_ac, 0.0, 0.5])
-                Z[-1].append(self.forward(state).max(0)[1])
-        cp = plt.contourf(X, Y, Z, 2, colors=['g', 'b', 'r'])
+        longitudes = np.linspace(-RADIUS, RADIUS, 80)
+        latitudes = np.linspace(-RADIUS, RADIUS, 80)
+        grid_lon, grid_lat = np.meshgrid(longitudes, latitudes)
+
+        policy = []
+        for lat in latitudes:
+            policy.append([])
+            for lon in longitudes:
+                qdr_ac, dist_ac = _qdrdist(0.0, 0.0, lat, lon)
+                qdr_ac = make_angle_convex(qdr_ac)
+                rel_hdg = make_angle_convex(qdr_ac + 180.0)
+                state = [qdr_ac, dist_ac, rel_hdg, 0.0, 24.0]
+                state = torch.tensor(normalize(state))
+                policy[-1].append(self.forward(state).max(0)[1])
+
+        cp = plt.contourf(grid_lon, grid_lat, policy, 2, colors=['g', 'b', 'r'])
         plt.colorbar(cp, ticks=[0, 1, 2])
-        ax.set_title('Policy for an aircraft at 0, 0')
+        ax.set_title('Policy for an aircraft at (0, 0) heading North')
         ax.set_xlabel('Actions corresponding to indices of ["LEFT", "NO_ACTION", "RIGHT"]')
         plt.show()
 
 
 class Buffer:
+    """
+    Stores training data and decides when and how to teach the neural net
+    """
 
     def __init__(self, _ID: str, actions_enum):
         self.ID = _ID
         self.SIZE = BUFFER_SIZE
 
-        self.memory = []  # [ [S, A, R+] , [S+, A+, R++] ... [_, _, FINAL_REWARD] ]
-        self.separation = 100.0  # Dummy starting value for separation between the aircrafts
+        self.memory = []  # [ [S, A, Return] , [S+, A+, Return+] ... [_, _, FINAL_REWARD] ]
+        self.separation = 2*RADIUS_NM  # Dummy starting value for separation between the aircrafts
         self.actions_enum = actions_enum
         self.episode_length = 0
         self.updates = 0
@@ -154,6 +232,9 @@ class Buffer:
         self.memory = []
 
     def set_separation(self, distance):
+        """
+        :param distance: in Nm
+        """
         self.separation = np.min([self.separation, distance])
 
     def add_state_action(self, state, action):
@@ -179,6 +260,7 @@ class Buffer:
 
     def get_reward_for_distance(self, critical_distance):
         """
+        :param critical_distance: desired separation between aircrafts (in Nm)
         :return: <float> Negative reward based on separation between aircrafts
         """
         reward = 0.0
@@ -188,7 +270,7 @@ class Buffer:
             correction_term = C1 / (self.separation - (critical_distance + C2)) ** 2
             reward = -1 * SEPARATION_COST + correction_term
 
-        self.separation = 100.0
+        self.separation = 2*RADIUS_NM
         return reward
 
     def get_terminal_reward(self):
@@ -203,3 +285,37 @@ class Buffer:
     def terminate_episode(self):
         self.episode_length = 0
 
+
+# ----- Some helper functions ----- #
+
+def make_angle_convex(angle):
+    """
+    :param angle: <float> angle in deg
+    :return: <float> angle between -180 to 180
+    """
+    angle %= 360
+    if angle > 180:
+        return angle - 360
+    return angle
+
+
+def _qdrdist(lat1, lon1, lat2, lon2):
+    """
+    Prevents BlueSky's qdrdist function from returning singular value
+    :return qdr (in deg), dist (in Nm)
+    """
+    return qdrdist(lat1, lon1, lat2 + 0.00001, lon2)
+
+
+def normalize(state):
+    """
+    :param state: [angle, distance, angle, angle, distance]
+    :return:
+    """
+    return [
+        state[0]/180.0,
+        state[1]/RADIUS_NM,
+        state[2]/180.0,
+        state[3]/180.0,
+        state[4]/RADIUS_NM
+    ]

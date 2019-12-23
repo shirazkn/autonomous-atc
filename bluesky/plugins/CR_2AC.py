@@ -9,43 +9,44 @@ atc-policy-2 : 40% Learnt policy for two-aircraft control
 
 from bluesky import traf, stack
 from bluesky.tools.geo import qdrdist
+
 from plugins.Sim_2AC import reset_aircrafts, RADIUS_NM, AIRCRAFT_IDs
 from plugins.CR_2AC_classes import ATC_Net, Buffer, Exploration
+from plugins.CR_2AC_classes import make_angle_convex, _qdrdist, normalize
 
 import pdb
 import torch
+from torch.optim.lr_scheduler import StepLR
+
 
 import numpy as np
 
 # ----- Problem Specifications ----- #
-dHeading = 10  # Max heading allowed in one time-step
+dHeading = 8  # Max heading allowed in one time-step
 actions_enum = [-dHeading, 0,  dHeading]  # Once of these actions given as a heading-change input
-critical_distance = 6.0  # Negative reward is incurred if aircrafts come closer than this
-RESOLVE_PERIOD = 250  # Every ___ steps of simulation, take conflict-resolution action
+critical_distance = 8.0  # Negative reward is incurred if aircrafts come closer than this
+RESOLVE_PERIOD = 400  # Every ___ steps of simulation, take conflict-resolution action
 
 """
 Notes : 
 Setting reward period to 600 and simulation radius to 24Nm gives episode length of ~10
-
-To do :
-Discounted rewards ( to prioritize conflict resolution & deviation )
-Use TD learning with experience replay & frozen network
-For each state-action, store target (using frozen network)
-Add a countdown for frozen network (to trigger synchronization)
-Add a size for the buffer & store episode length instead
-Make COUNTER>Resolve asynchronous
 """
 
 # ----- Initialization ----- #
-SAVED_STATE = None
+# SAVED_STATE = None
+SAVED_STATE = "saved_data/last_simulation/atc-policy.pt"
 aircrafts = None
 COUNTER = 0
 
-atc_net = ATC_Net(actions_enum)
-if SAVED_STATE:
+atc_net: ATC_Net = ATC_Net(actions_enum)
+
+try:
     atc_net.load_state_dict(torch.load(SAVED_STATE))
 
-exploration = Exploration()
+except:
+    print("No compatible saved state found. Using random initialization.")
+    atc_net.initialize(action_values={"0": 200.0, "1": 100.0, "2": 200.0}, critical_distance=critical_distance)
+
 buffers = {ID: Buffer(ID, actions_enum) for ID in AIRCRAFT_IDs}
 
 
@@ -135,8 +136,15 @@ def update():
 
                 # Reset everything (and maybe teach neural net)
                 buffers[ac.ID].check(atc_net)
-                ac.soft_reset()
-                exploration.decay()
+
+                # Move this aircraft to a boundary point that doesn't conflict with the other aircraft
+                other_ac_idx = (idx + 1) % 2
+                other_ac = {
+                    "lat": traf.lat[other_ac_idx],
+                    "lon": traf.lon[other_ac_idx],
+                    "separation": critical_distance
+                            }
+                ac.soft_reset(other_ac=other_ac)
 
 
 def resolve():
@@ -153,7 +161,7 @@ def resolve():
         # Choose action for current time-step
         state = get_state(buffer.ID)
         q_values = atc_net.forward(state)
-        action = get_action(q_values, epsilon=exploration.eps)
+        action = get_action(q_values, epsilon=atc_net.exploration.eps)
 
         # Store S, A in buffer (R will be observed later)
         buffer.add_state_action(state, action)
@@ -191,6 +199,7 @@ def get_state(ac_id: str):
         make_angle_convex(qdr_dn + self_hdg),
         dist_dn
     ]
+    state = normalize(state)
     return torch.tensor(state)
 
 
@@ -209,24 +218,6 @@ def get_action(q_values, epsilon):
         return q_values.max(0)[1]
 
 
-def make_angle_convex(angle):
-    """
-    :param angle: <float> angle in deg
-    :return: <float> angle between -180 to 180
-    """
-    angle %= 360
-    if angle > 180:
-        return angle - 360
-    return angle
-
-
-def _qdrdist(lat1, lon1, lat2, lon2):
-    """
-    Prevents BlueSky's qdrdist function from returning singular value
-    """
-    return qdrdist(lat1, lon1, lat2 + 0.000001, lon2)
-
-
 def show_net():
     """
     Visualizes the current Q(s,a_1) and Q(s,a_3) values of neural net
@@ -237,8 +228,11 @@ def show_net():
 
 def check_net():
     """
-    Use BlueSky command CHECK_NET to open pdb here
+    Use BlueSky command CHECK_NET to open pdb here (And save state of Neural Network)
     """
+    torch.save(atc_net.state_dict(), "saved_data/last_simulation/atc-policy.pt")
+    # for p in atc_net.parameters():
+    #     print(p.grad)
     pdb.set_trace()
 
 

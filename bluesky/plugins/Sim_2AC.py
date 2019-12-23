@@ -3,7 +3,7 @@ Plugin for simulating 2-aircraft conflict episodes, to train a conflict-resoluti
 Author : Shiraz Khan
 """
 
-from numpy import random, cos, sin, deg2rad
+from numpy import random, cos, sin, deg2rad, abs
 from bluesky import stack, traf
 from bluesky.tools.geo import qdrdist
 
@@ -23,17 +23,27 @@ class Aircraft:
         self.dest = destination  # Most desirable terminal state for this aircraft (Destination)
         self.ATC = ATC  # Whether ATC conflict-resolution is being applied to this aircraft
 
-    def soft_reset(self):
+    def soft_reset(self, other_ac=None):
         """
         Moves aircraft to random point on circumference ( New episode )
         """
-        hdg = random.uniform(0, 360.0)
-        hdg_r = deg2rad(hdg)
-        pos_lat = -1 * RADIUS * cos(hdg_r)
-        pos_lon = -1 * RADIUS * sin(hdg_r)
+        pos_lat, pos_lon, hdg = get_circumference_point()
+
+        # If there's another aircraft, avoid starting too close to it
+        if other_ac:
+            while qdrdist(pos_lat, pos_lon, other_ac["lat"], other_ac["lon"])[1] < 2.0*other_ac["separation"]:
+                pos_lat, pos_lon, hdg = get_circumference_point()
 
         self.dest = [-1.2 * pos_lat, -1.2 * pos_lon]
         stack.stack(f"MOVE {self.ID} {pos_lat} {pos_lon} FL200 {hdg} 400")
+
+
+def get_circumference_point():
+    hdg = random.uniform(-180.0, 180.0)
+    hdg_r = deg2rad(hdg)
+    pos_lat = -1 * RADIUS * cos(hdg_r)
+    pos_lon = -1 * RADIUS * sin(hdg_r)
+    return pos_lat, pos_lon, hdg
 
 
 def init_plugin():
