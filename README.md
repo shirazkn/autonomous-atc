@@ -20,8 +20,8 @@ Running BlueSky,
 - Use the Bluesky command `IC ML/2-AC.scn` to view the two-aircraft conflict scenario.
 
 #### RESOURCES
-BlueSky Wiki : https://github.com/TUDelft-CNS-ATM/bluesky/wiki <br>
-BlueSky Installation : http://homepage.tudelft.nl/7p97s/BlueSky/download.html
+[Official BlueSky Wiki](https://github.com/TUDelft-CNS-ATM/bluesky/wiki) <br>
+[BlueSky Installation Instructions](http://homepage.tudelft.nl/7p97s/BlueSky/download.html)
 <br><br>
  
 ---
@@ -33,11 +33,9 @@ BlueSky Installation : http://homepage.tudelft.nl/7p97s/BlueSky/download.html
 **State** : A tuple that has enough information embedded in it, to render each time-step a Markov Decision Process. 
 (Eg. for two aircrafts, it contains information about relative positions and headings of both aircrafts)<br><br>
 **Action** : The action taken at any time-step (Eg. change of heading by +5)<br><br>
-**Loss** : Inversely proportional to the 'reward' in reinforcement learning. ATC incurs a lower (or no) loss for more desirable conflict-resolution actions, and vice versa.<br><br>
+**Loss** : Inversely proportional to 'reward' in reinforcement learning. ATC incurs a lower (or no) loss for more desirable conflict-resolution actions, and vice versa.<br><br>
 **Policy** : The relationship that maps the state to the optimal action at any CR time-step.<br><br>
-**Episode** : The set of events that take place before the problem 'resets' itself. 
-(For eg. while learning to ride a bike, each time you fall can be thought of as the end of an episode).<br>
-Conflict-resolution lends itself very well to episodic learning, since the time-step when an aircraft leaves the air-traffic sector can be thought of as a terminal state.
+**Episode** : The set of events that take place before the problem 'resets' itself. Conflict-resolution lends itself very well to episodic learning, since the time-step when an aircraft leaves the air-traffic sector can be thought of as a terminal state.
 
 ***
 
